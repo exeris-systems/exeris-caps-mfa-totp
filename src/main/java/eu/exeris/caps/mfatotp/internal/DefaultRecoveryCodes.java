@@ -39,7 +39,7 @@ public final class DefaultRecoveryCodes implements RecoveryCodes {
         for (int i = 0; i < count; i++) {
             // 16 random bytes -> 32 hex chars raw code
             String rawCode = TokenHasher.generateSecureHex(16);
-            String codeHash = TokenHasher.hash(rawCode);
+            String codeHash = TokenHasher.hashWithSalt(rawCode, subjectId.toString());
 
             rawCodes.add(rawCode);
             records.add(new RecoveryCodeRecord(
@@ -63,7 +63,7 @@ public final class DefaultRecoveryCodes implements RecoveryCodes {
             throw new InvalidRecoveryCodeException();
         }
 
-        String codeHash = TokenHasher.hash(rawCode.trim());
+        String codeHash = TokenHasher.hashWithSalt(rawCode.trim(), subjectId.toString());
         Optional<RecoveryCodeRecord> recordOpt = repository.findRecoveryCodeByHash(codeHash);
 
         if (recordOpt.isEmpty()) {
