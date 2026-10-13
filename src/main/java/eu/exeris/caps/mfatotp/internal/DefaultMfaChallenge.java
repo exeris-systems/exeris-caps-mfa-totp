@@ -20,15 +20,18 @@ import java.util.UUID;
 public final class DefaultMfaChallenge implements MfaChallenge {
 
     private final MfaRepository repository;
+    private final TokenHasher hasher;
     private final MfaAuditBridge auditBridge;
     private final int maxFailedAttempts;
 
-    public DefaultMfaChallenge(MfaRepository repository, MfaAuditBridge auditBridge) {
-        this(repository, auditBridge, 5);
+    public DefaultMfaChallenge(MfaRepository repository, TokenHasher hasher, MfaAuditBridge auditBridge) {
+        this(repository, hasher, auditBridge, 5);
     }
 
-    public DefaultMfaChallenge(MfaRepository repository, MfaAuditBridge auditBridge, int maxFailedAttempts) {
+    public DefaultMfaChallenge(
+            MfaRepository repository, TokenHasher hasher, MfaAuditBridge auditBridge, int maxFailedAttempts) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
+        this.hasher = Objects.requireNonNull(hasher, "hasher must not be null");
         this.auditBridge = auditBridge;
         this.maxFailedAttempts = maxFailedAttempts;
     }
@@ -41,7 +44,7 @@ public final class DefaultMfaChallenge implements MfaChallenge {
         UUID challengeId = UUID.randomUUID();
         // 32 random bytes -> 64 hex chars opaque token
         String rawToken = TokenHasher.generateSecureHex(32);
-        String tokenHash = TokenHasher.hash(rawToken);
+        String tokenHash = hasher.hash(rawToken);
 
         Instant now = Instant.now();
         Instant expiresAt = now.plus(duration);
@@ -116,7 +119,7 @@ public final class DefaultMfaChallenge implements MfaChallenge {
         if (rawToken == null || rawToken.isBlank()) {
             throw new InvalidChallengeException("Challenge token must not be blank");
         }
-        String tokenHash = TokenHasher.hash(rawToken.trim());
+        String tokenHash = hasher.hash(rawToken.trim());
         return repository.findChallengeByHash(tokenHash)
                 .orElseThrow(() -> new InvalidChallengeException("Challenge not found"));
     }

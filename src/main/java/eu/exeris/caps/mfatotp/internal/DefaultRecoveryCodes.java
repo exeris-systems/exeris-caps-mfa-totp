@@ -18,10 +18,12 @@ import java.util.UUID;
 public final class DefaultRecoveryCodes implements RecoveryCodes {
 
     private final MfaRepository repository;
+    private final TokenHasher hasher;
     private final MfaAuditBridge auditBridge;
 
-    public DefaultRecoveryCodes(MfaRepository repository, MfaAuditBridge auditBridge) {
+    public DefaultRecoveryCodes(MfaRepository repository, TokenHasher hasher, MfaAuditBridge auditBridge) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
+        this.hasher = Objects.requireNonNull(hasher, "hasher must not be null");
         this.auditBridge = auditBridge;
     }
 
@@ -39,7 +41,7 @@ public final class DefaultRecoveryCodes implements RecoveryCodes {
         for (int i = 0; i < count; i++) {
             // 16 random bytes -> 32 hex chars raw code
             String rawCode = TokenHasher.generateSecureHex(16);
-            String codeHash = TokenHasher.hashWithSalt(rawCode, subjectId.toString());
+            String codeHash = hasher.hashWithSalt(rawCode, subjectId.toString());
 
             rawCodes.add(rawCode);
             records.add(new RecoveryCodeRecord(
@@ -63,7 +65,7 @@ public final class DefaultRecoveryCodes implements RecoveryCodes {
             throw new InvalidRecoveryCodeException();
         }
 
-        String codeHash = TokenHasher.hashWithSalt(rawCode.trim(), subjectId.toString());
+        String codeHash = hasher.hashWithSalt(rawCode.trim(), subjectId.toString());
         Optional<RecoveryCodeRecord> recordOpt = repository.findRecoveryCodeByHash(codeHash);
 
         if (recordOpt.isEmpty()) {

@@ -1,6 +1,6 @@
 package eu.exeris.caps.mfatotp.internal.repository;
 
-import eu.exeris.caps.mfatotp.internal.crypto.TokenHasher;
+import eu.exeris.caps.mfatotp.internal.TestSecrets;
 import eu.exeris.kernel.spi.persistence.PersistenceConnection;
 import eu.exeris.kernel.spi.persistence.PersistenceStatement;
 import eu.exeris.kernel.spi.persistence.QueryResult;
@@ -93,7 +93,7 @@ class PostgresMfaRepositoryTest {
     void saveAndCountRecoveryCodes() {
         UUID subjectId = UUID.randomUUID();
         UUID codeId = UUID.randomUUID();
-        String hash = TokenHasher.hash("code-1");
+        String hash = TestSecrets.hasher().hash("code-1");
         Instant now = Instant.now();
 
         RecoveryCodeRecord rec = new RecoveryCodeRecord(codeId, subjectId, hash, null, now);
@@ -134,7 +134,7 @@ class PostgresMfaRepositoryTest {
     void challengeLifecycleInPostgres() {
         UUID challengeId = UUID.randomUUID();
         UUID subjectId = UUID.randomUUID();
-        String tokenHash = TokenHasher.hash("raw-token");
+        String tokenHash = TestSecrets.hasher().hash("raw-token");
         Instant now = Instant.now();
         Instant expiresAt = now.plusSeconds(300);
 

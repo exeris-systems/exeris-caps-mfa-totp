@@ -27,7 +27,7 @@ class DefaultMfaChallengeTest {
     @BeforeEach
     void setUp() {
         repository = new InMemoryMfaRepository();
-        mfaChallenge = new DefaultMfaChallenge(repository, null, 3);
+        mfaChallenge = new DefaultMfaChallenge(repository, TestSecrets.hasher(), null, 3);
         subjectId = UUID.randomUUID();
     }
 
