@@ -3,6 +3,8 @@
 -- mfa_factors.secret and mfa_factors.pending_secret hold AES-256-GCM envelopes (Base64), never a
 -- plaintext seed; the envelope names the key that sealed it and binds the row id, subject and column.
 -- A NULL column means "no secret": an empty string is not a sentinel.
+-- last_accepted_step is the highest TOTP time step a verification accepted; a code is accepted only at
+-- a greater step, so a code works once (RFC 6238 section 5.2).
 
 CREATE TABLE IF NOT EXISTS mfa_factors (
     id UUID PRIMARY KEY,
@@ -12,6 +14,7 @@ CREATE TABLE IF NOT EXISTS mfa_factors (
     enabled BOOLEAN NOT NULL DEFAULT FALSE,
     enrolled_at TIMESTAMPTZ,
     last_verified_at TIMESTAMPTZ,
+    last_accepted_step BIGINT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

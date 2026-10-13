@@ -1,7 +1,6 @@
 package eu.exeris.caps.mfatotp.internal;
 
 import eu.exeris.caps.mfatotp.api.TotpFactorRegistry;
-import eu.exeris.caps.mfatotp.api.TotpVerifier;
 import eu.exeris.caps.mfatotp.api.exception.FactorAlreadyEnrolledException;
 import eu.exeris.caps.mfatotp.api.exception.FactorNotFoundException;
 import eu.exeris.caps.mfatotp.api.exception.InvalidTotpCodeException;
@@ -23,7 +22,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class DefaultTotpFactorRegistryTest {
 
     private MfaRepository repository;
-    private TotpVerifier verifier;
+    private DefaultTotpVerifier verifier;
     private TotpFactorRegistry registry;
     private UUID subjectId;
 
@@ -65,8 +64,8 @@ class DefaultTotpFactorRegistryTest {
         assertThatThrownBy(() -> registry.beginEnrollment(subjectId, "alice@example.com"))
                 .isInstanceOf(FactorAlreadyEnrolledException.class);
 
-        // Verification succeeds via verifier
-        assertThat(verifier.verify(subjectId, validCode)).isTrue();
+        // The code that confirmed enrolment is spent: it does not verify a second time
+        assertThat(verifier.verify(subjectId, validCode)).isFalse();
 
         // Disable factor
         registry.disableFactor(subjectId);

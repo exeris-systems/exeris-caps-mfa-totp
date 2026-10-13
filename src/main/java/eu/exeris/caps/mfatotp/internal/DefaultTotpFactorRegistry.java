@@ -1,7 +1,6 @@
 package eu.exeris.caps.mfatotp.internal;
 
 import eu.exeris.caps.mfatotp.api.TotpFactorRegistry;
-import eu.exeris.caps.mfatotp.api.TotpVerifier;
 import eu.exeris.caps.mfatotp.api.exception.FactorAlreadyEnrolledException;
 import eu.exeris.caps.mfatotp.api.exception.FactorNotFoundException;
 import eu.exeris.caps.mfatotp.api.exception.InvalidTotpCodeException;
@@ -17,18 +16,19 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.UUID;
 
 public final class DefaultTotpFactorRegistry implements TotpFactorRegistry {
 
     private final MfaRepository repository;
-    private final TotpVerifier verifier;
+    private final DefaultTotpVerifier verifier;
     private final MfaAuditBridge auditBridge;
     private final String issuer;
 
     public DefaultTotpFactorRegistry(
             MfaRepository repository,
-            TotpVerifier verifier,
+            DefaultTotpVerifier verifier,
             MfaAuditBridge auditBridge,
             String issuer
     ) {
@@ -53,10 +53,10 @@ public final class DefaultTotpFactorRegistry implements TotpFactorRegistry {
 
         FactorRecord record = existing.map(rec -> new FactorRecord(
                 rec.id(), subjectId, rec.secret(), pendingSecret,
-                false, null, null, rec.createdAt(), now
+                false, null, null, rec.createdAt(), now, null
         )).orElseGet(() -> new FactorRecord(
                 UUID.randomUUID(), subjectId, null, pendingSecret,
-                false, null, null, now, now
+                false, null, null, now, now, null
         ));
 
         repository.saveFactor(record);
@@ -77,15 +77,15 @@ public final class DefaultTotpFactorRegistry implements TotpFactorRegistry {
             throw new InvalidTotpCodeException();
         }
 
-        boolean valid = verifier.verifyRaw(record.pendingSecret(), code);
-        if (!valid) {
+        OptionalLong step = verifier.matchStep(record.pendingSecret(), code);
+        if (step.isEmpty()) {
             throw new InvalidTotpCodeException();
         }
 
         Instant now = Instant.now();
         FactorRecord activated = new FactorRecord(
                 record.id(), subjectId, record.pendingSecret(), null,
-                true, now, now, record.createdAt(), now
+                true, now, now, record.createdAt(), now, step.getAsLong()
         );
 
         repository.saveFactor(activated);

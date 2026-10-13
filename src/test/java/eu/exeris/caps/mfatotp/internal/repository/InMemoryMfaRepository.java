@@ -25,6 +25,22 @@ public final class InMemoryMfaRepository implements MfaRepository {
     }
 
     @Override
+    public synchronized boolean advanceAcceptedStep(UUID factorId, long step, Instant now) {
+        for (FactorRecord rec : factorsBySubject.values()) {
+            if (rec.id().equals(factorId)) {
+                if (!rec.enabled() || (rec.lastAcceptedStep() != null && rec.lastAcceptedStep() >= step)) {
+                    return false;
+                }
+                factorsBySubject.put(rec.subjectId(), new FactorRecord(
+                        rec.id(), rec.subjectId(), rec.secret(), rec.pendingSecret(), rec.enabled(),
+                        rec.enrolledAt(), now, rec.createdAt(), now, step));
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
     public void deleteFactor(UUID subjectId) {
         factorsBySubject.remove(subjectId);
     }

@@ -13,6 +13,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 public final class PostgresMfaRepository implements MfaRepository {
 
@@ -46,7 +47,7 @@ public final class PostgresMfaRepository implements MfaRepository {
     @Override
     public Optional<FactorRecord> findFactorBySubjectId(UUID subjectId) {
         String sql = """
-                SELECT id, subject_id, secret, pending_secret, enabled, enrolled_at, last_verified_at, created_at, updated_at
+                SELECT id, subject_id, secret, pending_secret, enabled, enrolled_at, last_verified_at, created_at, updated_at, last_accepted_step
                 FROM mfa_factors
                 WHERE subject_id = $1
                 """;
@@ -67,7 +68,8 @@ public final class PostgresMfaRepository implements MfaRepository {
                                 row.getInstant(5),
                                 row.getInstant(6),
                                 row.getInstant(7),
-                                row.getInstant(8)
+                                row.getInstant(8),
+                                row.isNull(9) ? null : row.getLong(9)
                         ));
                     }
                     return Optional.empty();
@@ -79,15 +81,16 @@ public final class PostgresMfaRepository implements MfaRepository {
     @Override
     public void saveFactor(FactorRecord record) {
         String sql = """
-                INSERT INTO mfa_factors (id, subject_id, secret, pending_secret, enabled, enrolled_at, last_verified_at, created_at, updated_at)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                INSERT INTO mfa_factors (id, subject_id, secret, pending_secret, enabled, enrolled_at, last_verified_at, created_at, updated_at, last_accepted_step)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                 ON CONFLICT (subject_id) DO UPDATE SET
                     secret = EXCLUDED.secret,
                     pending_secret = EXCLUDED.pending_secret,
                     enabled = EXCLUDED.enabled,
                     enrolled_at = EXCLUDED.enrolled_at,
                     last_verified_at = EXCLUDED.last_verified_at,
-                    updated_at = EXCLUDED.updated_at
+                    updated_at = EXCLUDED.updated_at,
+                    last_accepted_step = EXCLUDED.last_accepted_step
                 """;
         tx.executeManaged(conn -> {
             try (PersistenceStatement stmt = conn.prepare(sql)) {
@@ -112,9 +115,39 @@ public final class PostgresMfaRepository implements MfaRepository {
                 stmt.bindInstant(7, record.createdAt())
                     .bindInstant(8, record.updatedAt());
 
+                if (record.lastAcceptedStep() != null) {
+                    stmt.bindLong(9, record.lastAcceptedStep());
+                } else {
+                    stmt.bindNull(9);
+                }
+
                 stmt.executeUpdate();
             }
         });
+    }
+
+    @Override
+    public boolean advanceAcceptedStep(UUID factorId, long step, Instant now) {
+        // The step and the instant are selected once into the derived table p: each placeholder is
+        // positional, so a value used twice would otherwise have to be bound twice.
+        String sql = """
+                UPDATE mfa_factors f
+                SET last_accepted_step = p.step, last_verified_at = p.at, updated_at = p.at
+                FROM (SELECT $1::bigint AS step, $2::timestamptz AS at, $3::uuid AS id) p
+                WHERE f.id = p.id AND f.enabled
+                  AND (f.last_accepted_step IS NULL OR f.last_accepted_step < p.step)
+                """;
+        AtomicLong affected = new AtomicLong();
+        tx.executeManaged(conn -> {
+            affected.set(0);
+            try (PersistenceStatement stmt = conn.prepare(sql)) {
+                stmt.bindLong(0, step)
+                    .bindInstant(1, now)
+                    .bindUuid(2, factorId);
+                affected.set(stmt.executeUpdate());
+            }
+        });
+        return affected.get() > 0;
     }
 
     @Override

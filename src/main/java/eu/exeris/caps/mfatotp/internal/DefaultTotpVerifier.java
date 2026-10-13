@@ -6,9 +6,10 @@ import eu.exeris.caps.mfatotp.internal.crypto.Rfc6238Totp;
 import eu.exeris.caps.mfatotp.internal.repository.FactorRecord;
 import eu.exeris.caps.mfatotp.internal.repository.MfaRepository;
 
-import java.time.Instant;
+import java.time.Clock;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.UUID;
 
 public final class DefaultTotpVerifier implements TotpVerifier {
@@ -18,19 +19,27 @@ public final class DefaultTotpVerifier implements TotpVerifier {
     private final int windowTolerance;
     private final int timeStepSeconds;
     private final int digits;
+    private final Clock clock;
 
     public DefaultTotpVerifier(MfaRepository repository, MfaAuditBridge auditBridge) {
-        this(repository, auditBridge, 1, 30, 6);
+        this(repository, auditBridge, 1, 30, 6, Clock.systemUTC());
     }
 
+    /**
+     * @throws IllegalArgumentException when the window is negative, the step is not positive, or the digits
+     *                                  are not between 1 and 8
+     */
     public DefaultTotpVerifier(
             MfaRepository repository,
             MfaAuditBridge auditBridge,
             int windowTolerance,
             int timeStepSeconds,
-            int digits
+            int digits,
+            Clock clock
     ) {
+        Rfc6238Totp.requireParameters(timeStepSeconds, digits, windowTolerance);
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
+        this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.auditBridge = auditBridge;
         this.windowTolerance = windowTolerance;
         this.timeStepSeconds = timeStepSeconds;
@@ -49,27 +58,31 @@ public final class DefaultTotpVerifier implements TotpVerifier {
         }
 
         FactorRecord factor = factorOpt.get();
-        boolean valid = verifyRaw(factor.secret(), code);
-        if (valid) {
-            FactorRecord updated = new FactorRecord(
-                    factor.id(), factor.subjectId(), factor.secret(), factor.pendingSecret(),
-                    factor.enabled(), factor.enrolledAt(), Instant.now(),
-                    factor.createdAt(), Instant.now()
-            );
-            repository.saveFactor(updated);
-        }
+        // A code is accepted once: its time step must be greater than any accepted before, and recording
+        // that is a single conditional update, so concurrent presentations of one code admit one.
+        OptionalLong step = matchStep(factor.secret(), code);
+        boolean valid = step.isPresent()
+                && repository.advanceAcceptedStep(factor.id(), step.getAsLong(), clock.instant());
         if (auditBridge != null) {
             auditBridge.logTotpVerified(subjectId, valid);
         }
         return valid;
     }
 
+    /** Stateless: whether the code is valid now for the secret. It does not consume the code. */
     @Override
     public boolean verifyRaw(String base32Secret, String code) {
-        return Rfc6238Totp.verifyCode(
+        return matchStep(base32Secret, code).isPresent();
+    }
+
+    /**
+     * @return the time step at which {@code code} is valid for the secret now, or empty
+     */
+    public OptionalLong matchStep(String base32Secret, String code) {
+        return Rfc6238Totp.matchingCounter(
                 base32Secret,
                 code,
-                Instant.now().getEpochSecond(),
+                clock.instant().getEpochSecond(),
                 timeStepSeconds,
                 digits,
                 windowTolerance

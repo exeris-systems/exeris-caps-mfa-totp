@@ -29,6 +29,10 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -97,7 +101,7 @@ class PostgresMfaRepositoryLiveIT {
     private static FactorRecord factor(UUID subject, String secret, String pending, boolean enabled) {
         Instant now = now();
         return new FactorRecord(UUID.randomUUID(), subject, secret, pending, enabled, enabled ? now : null,
-                null, now, now);
+                null, now, now, null);
     }
 
     private static String rawColumn(UUID subject, String column) throws SQLException {
@@ -224,6 +228,69 @@ class PostgresMfaRepositoryLiveIT {
         try (Connection conn = open(); Statement stmt = conn.createStatement()) {
             stmt.execute("DELETE FROM mfa_factors");
         }
+    }
+
+    @Test
+    @DisplayName("a step is accepted once: equal and older steps are refused, a greater one is accepted")
+    void acceptedStepAdvancesOnlyForward() {
+        UUID subject = UUID.randomUUID();
+        FactorRecord enabled = factor(subject, "JBSWY3DPEHPK3PXP", null, true);
+        repository.saveFactor(enabled);
+
+        assertThat(repository.advanceAcceptedStep(enabled.id(), 100L, now())).isTrue();
+        assertThat(repository.advanceAcceptedStep(enabled.id(), 100L, now())).isFalse();
+        assertThat(repository.advanceAcceptedStep(enabled.id(), 99L, now())).isFalse();
+        assertThat(repository.advanceAcceptedStep(enabled.id(), 101L, now())).isTrue();
+
+        FactorRecord read = repository.findFactorBySubjectId(subject).orElseThrow();
+        assertThat(read.lastAcceptedStep()).isEqualTo(101L);
+        assertThat(read.lastVerifiedAt()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("of many concurrent presentations of one step exactly one is accepted")
+    void concurrentSameStepAdmitsOne() throws Exception {
+        UUID subject = UUID.randomUUID();
+        FactorRecord enabled = factor(subject, "JBSWY3DPEHPK3PXP", null, true);
+        repository.saveFactor(enabled);
+        int callers = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(callers);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<Future<Boolean>> results = new ArrayList<>();
+            for (int i = 0; i < callers; i++) {
+                results.add(pool.submit(() -> {
+                    start.await();
+                    return repository.advanceAcceptedStep(enabled.id(), 777L, now());
+                }));
+            }
+            start.countDown();
+            int accepted = 0;
+            for (Future<Boolean> result : results) {
+                if (result.get()) {
+                    accepted++;
+                }
+            }
+            assertThat(accepted).isEqualTo(1);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("a step is never recorded for a pending factor, and never recreates a deleted one")
+    void advanceNeverInserts() {
+        UUID pendingSubject = UUID.randomUUID();
+        FactorRecord pending = factor(pendingSubject, null, "PENDINGSEEDPENDING", false);
+        repository.saveFactor(pending);
+        assertThat(repository.advanceAcceptedStep(pending.id(), 5L, now())).isFalse();
+
+        UUID subject = UUID.randomUUID();
+        FactorRecord enabled = factor(subject, "JBSWY3DPEHPK3PXP", null, true);
+        repository.saveFactor(enabled);
+        repository.deleteFactor(subject);
+        assertThat(repository.advanceAcceptedStep(enabled.id(), 5L, now())).isFalse();
+        assertThat(repository.findFactorBySubjectId(subject)).isEmpty();
     }
 
     private static String setting(String env, String property) {
