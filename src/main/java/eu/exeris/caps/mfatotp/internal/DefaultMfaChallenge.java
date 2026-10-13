@@ -7,10 +7,12 @@ import eu.exeris.caps.mfatotp.api.exception.InvalidChallengeException;
 import eu.exeris.caps.mfatotp.api.model.ChallengeStatus;
 import eu.exeris.caps.mfatotp.api.model.IssuedChallenge;
 import eu.exeris.caps.mfatotp.internal.audit.MfaAuditBridge;
+import eu.exeris.caps.mfatotp.internal.config.MfaTotpSettings;
 import eu.exeris.caps.mfatotp.internal.crypto.TokenHasher;
 import eu.exeris.caps.mfatotp.internal.repository.ChallengeRecord;
 import eu.exeris.caps.mfatotp.internal.repository.MfaRepository;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
@@ -23,14 +25,38 @@ public final class DefaultMfaChallenge implements MfaChallenge {
     private final TokenHasher hasher;
     private final MfaAuditBridge auditBridge;
     private final int maxFailedAttempts;
+    private final Duration defaultTtl;
+    private final Duration maxTtl;
+    private final Clock clock;
 
     public DefaultMfaChallenge(MfaRepository repository, TokenHasher hasher, MfaAuditBridge auditBridge) {
-        this(repository, hasher, auditBridge, 5);
+        this(repository, hasher, auditBridge, 5, MfaTotpSettings.DEFAULT_CHALLENGE_TTL,
+                MfaTotpSettings.DEFAULT_CHALLENGE_MAX_TTL, Clock.systemUTC());
     }
 
+    /**
+     * @param defaultTtl lifetime of a challenge issued without one
+     * @param maxTtl     upper bound on any lifetime; a longer request is clamped to it
+     */
     public DefaultMfaChallenge(
-            MfaRepository repository, TokenHasher hasher, MfaAuditBridge auditBridge, int maxFailedAttempts) {
+            MfaRepository repository,
+            TokenHasher hasher,
+            MfaAuditBridge auditBridge,
+            int maxFailedAttempts,
+            Duration defaultTtl,
+            Duration maxTtl,
+            Clock clock
+    ) {
         this.repository = Objects.requireNonNull(repository, "repository must not be null");
+        this.defaultTtl = positive(defaultTtl, "defaultTtl");
+        this.maxTtl = positive(maxTtl, "maxTtl");
+        if (defaultTtl.compareTo(maxTtl) > 0) {
+            throw new IllegalArgumentException("defaultTtl must not exceed maxTtl");
+        }
+        if (maxFailedAttempts < 1) {
+            throw new IllegalArgumentException("maxFailedAttempts must be positive");
+        }
+        this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.hasher = Objects.requireNonNull(hasher, "hasher must not be null");
         this.auditBridge = auditBridge;
         this.maxFailedAttempts = maxFailedAttempts;
@@ -39,14 +65,17 @@ public final class DefaultMfaChallenge implements MfaChallenge {
     @Override
     public IssuedChallenge issue(UUID subjectId, Duration ttl) {
         Objects.requireNonNull(subjectId, "subjectId must not be null");
-        Duration duration = ttl != null ? ttl : Duration.ofMinutes(5);
+        if (ttl != null && (ttl.isZero() || ttl.isNegative())) {
+            throw new IllegalArgumentException("ttl must be positive");
+        }
+        Duration duration = ttl == null ? defaultTtl : (ttl.compareTo(maxTtl) > 0 ? maxTtl : ttl);
 
         UUID challengeId = UUID.randomUUID();
         // 32 random bytes -> 64 hex chars opaque token
         String rawToken = TokenHasher.generateSecureHex(32);
         String tokenHash = hasher.hash(rawToken);
 
-        Instant now = Instant.now();
+        Instant now = clock.instant();
         Instant expiresAt = now.plus(duration);
 
         ChallengeRecord record = new ChallengeRecord(
@@ -72,7 +101,7 @@ public final class DefaultMfaChallenge implements MfaChallenge {
             throw new InvalidChallengeException("Challenge already consumed");
         }
 
-        if (Instant.now().isAfter(record.expiresAt())) {
+        if (clock.instant().isAfter(record.expiresAt())) {
             throw new ChallengeExpiredException();
         }
 
@@ -107,12 +136,20 @@ public final class DefaultMfaChallenge implements MfaChallenge {
 
         validate(rawToken);
 
-        boolean consumed = repository.consumeChallenge(record.id(), Instant.now());
+        boolean consumed = repository.consumeChallenge(record.id(), clock.instant());
         if (!consumed) {
             throw new InvalidChallengeException("Challenge could not be consumed (possible concurrent replay)");
         }
 
         return record.subjectId();
+    }
+
+    private static Duration positive(Duration value, String name) {
+        Objects.requireNonNull(value, name + " must not be null");
+        if (value.isZero() || value.isNegative()) {
+            throw new IllegalArgumentException(name + " must be positive");
+        }
+        return value;
     }
 
     private ChallengeRecord lookupChallenge(String rawToken) {

@@ -137,11 +137,12 @@ public final class MfaTotpModule implements CapabilityLifecycleHooks {
         Objects.requireNonNull(repository, "repository must not be null");
         Objects.requireNonNull(clock, "clock must not be null");
         TokenHasher hasher = new TokenHasher(settings.pepper());
-        DefaultTotpVerifier verifier = new DefaultTotpVerifier(repository, auditBridge);
+        DefaultTotpVerifier verifier = new DefaultTotpVerifier(repository, auditBridge, 1, 30, 6, clock);
         this.totpVerifier = verifier;
         this.totpFactorRegistry = new DefaultTotpFactorRegistry(repository, verifier, auditBridge, issuer);
         this.recoveryCodes = new DefaultRecoveryCodes(repository, hasher, auditBridge);
-        this.mfaChallenge = new DefaultMfaChallenge(repository, hasher, auditBridge);
+        this.mfaChallenge = new DefaultMfaChallenge(repository, hasher, auditBridge, 5,
+                settings.challengeTtl(), settings.challengeMaxTtl(), clock);
     }
 
     private static <T> T wired(T service) {
