@@ -224,14 +224,18 @@ public final class PostgresMfaRepository implements MfaRepository {
                 SET consumed_at = $1
                 WHERE id = $2 AND consumed_at IS NULL
                 """;
-        Long affected = tx.query(conn -> {
+        // The executor may run a unit of work again on a serialization failure, so the holder is reset
+        // at the start of the unit.
+        AtomicLong affected = new AtomicLong();
+        tx.executeManaged(conn -> {
+            affected.set(0);
             try (PersistenceStatement stmt = conn.prepare(sql)) {
                 stmt.bindInstant(0, consumedAt)
                     .bindUuid(1, id);
-                return stmt.executeUpdate();
+                affected.set(stmt.executeUpdate());
             }
         });
-        return affected != null && affected > 0;
+        return affected.get() > 0;
     }
 
     @Override
@@ -343,14 +347,18 @@ public final class PostgresMfaRepository implements MfaRepository {
                 SET consumed_at = $1
                 WHERE id = $2 AND consumed_at IS NULL
                 """;
-        Long affected = tx.query(conn -> {
+        // The executor may run a unit of work again on a serialization failure, so the holder is reset
+        // at the start of the unit.
+        AtomicLong affected = new AtomicLong();
+        tx.executeManaged(conn -> {
+            affected.set(0);
             try (PersistenceStatement stmt = conn.prepare(sql)) {
                 stmt.bindInstant(0, consumedAt)
                     .bindUuid(1, challengeId);
-                return stmt.executeUpdate();
+                affected.set(stmt.executeUpdate());
             }
         });
-        return affected != null && affected > 0;
+        return affected.get() > 0;
     }
 
     /**

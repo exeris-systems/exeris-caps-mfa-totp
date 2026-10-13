@@ -179,6 +179,8 @@ class PostgresMfaRepositoryTest {
         tx.rowsAffectedResult = 0L;
         boolean consumedAgain = repository.consumeRecoveryCode(codeId, now);
         assertThat(consumedAgain).isFalse();
+
+        assertThat(tx.queryCalls).as("a write must not use the read-only query path").isZero();
     }
 
     @Test
@@ -223,6 +225,7 @@ class PostgresMfaRepositoryTest {
         tx.rowsAffectedResult = 1L;
         boolean consumed = repository.consumeChallenge(challengeId, now);
         assertThat(consumed).isTrue();
+        assertThat(tx.queryCalls).as("a write must not use the read-only query path").isZero();
     }
 
     // --- Stubs for TransactionalExecutor testing ---

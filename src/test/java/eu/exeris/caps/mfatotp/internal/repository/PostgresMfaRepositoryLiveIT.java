@@ -293,6 +293,26 @@ class PostgresMfaRepositoryLiveIT {
         assertThat(repository.findFactorBySubjectId(subject)).isEmpty();
     }
 
+    @Test
+    @DisplayName("a recovery code and a challenge are consumed once, and the second consumer is told so")
+    void consumeIsSingleUse() {
+        UUID subject = UUID.randomUUID();
+        RecoveryCodeRecord code = new RecoveryCodeRecord(UUID.randomUUID(), subject,
+                (UUID.randomUUID().toString() + UUID.randomUUID()).replace("-", "").substring(0, 64), null, now());
+        repository.saveRecoveryCodes(subject, List.of(code));
+        assertThat(repository.consumeRecoveryCode(code.id(), now())).isTrue();
+        assertThat(repository.consumeRecoveryCode(code.id(), now())).isFalse();
+        assertThat(repository.countUnconsumedRecoveryCodes(subject)).isZero();
+
+        ChallengeRecord challenge = new ChallengeRecord(UUID.randomUUID(), subject,
+                (UUID.randomUUID().toString() + UUID.randomUUID()).replace("-", "").substring(0, 64),
+                0, 5, now().plusSeconds(300), null, now());
+        repository.saveChallenge(challenge);
+        assertThat(repository.consumeChallenge(challenge.id(), now())).isTrue();
+        assertThat(repository.consumeChallenge(challenge.id(), now())).isFalse();
+        assertThat(repository.findChallengeByHash(challenge.tokenHash()).orElseThrow().consumedAt()).isNotNull();
+    }
+
     private static String setting(String env, String property) {
         String value = System.getProperty(property);
         if (value == null || value.isBlank()) {
