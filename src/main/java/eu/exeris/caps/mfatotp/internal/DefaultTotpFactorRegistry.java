@@ -123,9 +123,14 @@ public final class DefaultTotpFactorRegistry implements TotpFactorRegistry {
                 .orElseGet(() -> TotpFactorStatus.notEnrolled(subjectId));
     }
 
+    /** Percent-encoding for a URI label: a space is {@code %20}, because authenticators show {@code +} literally. */
+    private static String percentEncode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+    }
+
     private String buildProvisioningUri(String base32Secret, String accountLabel) {
-        String encodedIssuer = URLEncoder.encode(issuer, StandardCharsets.UTF_8);
-        String encodedAccount = URLEncoder.encode(accountLabel, StandardCharsets.UTF_8);
+        String encodedIssuer = percentEncode(issuer);
+        String encodedAccount = percentEncode(accountLabel);
         return "otpauth://totp/"
                 + encodedIssuer + ":" + encodedAccount
                 + "?secret=" + base32Secret

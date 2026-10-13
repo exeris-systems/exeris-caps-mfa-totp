@@ -35,6 +35,17 @@ class DefaultTotpFactorRegistryTest {
     }
 
     @Test
+    @DisplayName("Spaces in the issuer and the account label are percent-encoded as %20, never as +")
+    void testProvisioningUriEncodesSpaces() {
+        DefaultTotpFactorRegistry spaced = new DefaultTotpFactorRegistry(repository, verifier, null, "My App");
+
+        String uri = spaced.beginEnrollment(subjectId, "alice smith@example.com").provisioningUri();
+
+        assertThat(uri).startsWith("otpauth://totp/My%20App:alice%20smith%40example.com?secret=")
+                .contains("&issuer=My%20App&").doesNotContain("+");
+    }
+
+    @Test
     @DisplayName("Complete enrollment lifecycle: begin, confirm, getStatus, disable")
     void testEnrollmentLifecycle() {
         // Initial status
