@@ -3,7 +3,7 @@
   "stamp" : {
     "validated" : true,
     "compositionVersion" : "0.0.0",
-    "contentBinding" : "sha256:53cdf3e13708df120545016ea06d5219fa3fd9f7ea8fcec90ab66231d6cc679d"
+    "contentBinding" : "sha256:c387e68165dba2d02831a09ead95d0b39e1c3cb38d41c4266154ce6fadc51b2b"
   },
   "modules" : [
     {
@@ -14,19 +14,19 @@
         "provides" : [
           {
             "service" : "eu.exeris.caps.mfatotp.api.TotpFactorRegistry",
-            "version" : "1.0.0"
+            "version" : "0.1.0"
           },
           {
             "service" : "eu.exeris.caps.mfatotp.api.TotpVerifier",
-            "version" : "1.0.0"
+            "version" : "0.1.0"
           },
           {
             "service" : "eu.exeris.caps.mfatotp.api.RecoveryCodes",
-            "version" : "1.0.0"
+            "version" : "0.1.0"
           },
           {
             "service" : "eu.exeris.caps.mfatotp.api.MfaChallenge",
-            "version" : "1.0.0"
+            "version" : "0.1.0"
           }
         ],
         "requires" : [
@@ -36,7 +36,7 @@
           },
           {
             "service" : "eu.exeris.caps.audittrail.api.AuditLogSink",
-            "versionRange" : "[1.0.0,2.0.0)",
+            "versionRange" : "[0.1.0,0.2.0)",
             "optional" : true
           }
         ],
@@ -48,7 +48,7 @@
     {
       "module" : "eu.exeris.caps.mfatotp.MfaTotpModule",
       "service" : "eu.exeris.caps.audittrail.api.AuditLogSink",
-      "versionRange" : "[1.0.0,2.0.0)",
+      "versionRange" : "[0.1.0,0.2.0)",
       "optional" : true,
       "satisfied" : false,
       "providers" : [ ]
@@ -66,7 +66,7 @@
     "eu.exeris.caps.mfatotp.MfaTotpModule"
   ],
   "warnings" : [
-    "module eu.exeris.caps.mfatotp.MfaTotpModule @Requires service eu.exeris.caps.audittrail.api.AuditLogSink version [1.0.0,2.0.0) but no @CapabilityModule provides it (optional — skipped)",
+    "module eu.exeris.caps.mfatotp.MfaTotpModule @Requires service eu.exeris.caps.audittrail.api.AuditLogSink version [0.1.0,0.2.0) but no @CapabilityModule provides it (optional — skipped)",
     "module eu.exeris.caps.mfatotp.MfaTotpModule @Requires service eu.exeris.kernel.spi.persistence.TransactionalExecutor but no @CapabilityModule provides it (optional — skipped)"
   ]
 }

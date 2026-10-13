@@ -39,12 +39,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 @CapabilityModule
 @CapabilityLifecycle
-@Provides(service = TotpFactorRegistry.class, version = "1.0.0")
-@Provides(service = TotpVerifier.class, version = "1.0.0")
-@Provides(service = RecoveryCodes.class, version = "1.0.0")
-@Provides(service = MfaChallenge.class, version = "1.0.0")
+@Provides(service = TotpFactorRegistry.class, version = "0.1.0")
+@Provides(service = TotpVerifier.class, version = "0.1.0")
+@Provides(service = RecoveryCodes.class, version = "0.1.0")
+@Provides(service = MfaChallenge.class, version = "0.1.0")
 @Requires(service = TransactionalExecutor.class, optional = true)
-@Requires(service = AuditLogSink.class, versionRange = "[1.0.0,2.0.0)", optional = true)
+@Requires(service = AuditLogSink.class, versionRange = "[0.1.0,0.2.0)", optional = true)
 public final class MfaTotpModule implements CapabilityLifecycleHooks {
 
     private final TotpFactorRegistry totpFactorRegistry;
