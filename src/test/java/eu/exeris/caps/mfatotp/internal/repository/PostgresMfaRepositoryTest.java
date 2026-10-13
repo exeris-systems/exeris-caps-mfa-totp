@@ -1,5 +1,6 @@
 package eu.exeris.caps.mfatotp.internal.repository;
 
+import eu.exeris.caps.mfatotp.api.exception.TotpSecretCustodyException;
 import eu.exeris.caps.mfatotp.internal.TestSecrets;
 import eu.exeris.kernel.spi.persistence.PersistenceConnection;
 import eu.exeris.kernel.spi.persistence.PersistenceStatement;
@@ -21,6 +22,7 @@ import java.util.UUID;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("PostgresMfaRepository Unit Tests")
 class PostgresMfaRepositoryTest {
@@ -31,7 +33,7 @@ class PostgresMfaRepositoryTest {
     @BeforeEach
     void setUp() {
         tx = new CapturingTransactionalExecutor();
-        repository = new PostgresMfaRepository(tx);
+        repository = new PostgresMfaRepository(tx, TestSecrets.envelope());
     }
 
     @Test
@@ -52,8 +54,11 @@ class PostgresMfaRepositoryTest {
         assertThat(stmt.sql).contains("INSERT INTO mfa_factors");
         assertThat(stmt.boundParameters.get(0)).isEqualTo(factorId);
         assertThat(stmt.boundParameters.get(1)).isEqualTo(subjectId);
-        assertThat(stmt.boundParameters.get(2)).isEqualTo("BASE32SECRET");
-        assertThat(stmt.boundParameters.get(3)).isEqualTo("PENDINGSECRET");
+        assertThat(stmt.boundParameters.get(2)).asString().doesNotContain("BASE32SECRET");
+        assertThat(TestSecrets.envelope().open(PostgresMfaRepository.context(factorId, subjectId, "secret"),
+                (String) stmt.boundParameters.get(2))).isEqualTo("BASE32SECRET");
+        assertThat(TestSecrets.envelope().open(PostgresMfaRepository.context(factorId, subjectId, "pending_secret"),
+                (String) stmt.boundParameters.get(3))).isEqualTo("PENDINGSECRET");
         assertThat(stmt.boundParameters.get(4)).isEqualTo(true);
         assertThat(stmt.boundParameters.get(5)).isEqualTo(now);
         assertThat(stmt.boundParameters.get(6)).isEqualTo(now);
@@ -69,7 +74,10 @@ class PostgresMfaRepositoryTest {
         Instant now = Instant.now();
 
         Object[] rowData = new Object[]{
-                factorId, subjectId, "SECRET32", "PENDING", true, now, now, now, now
+                factorId, subjectId,
+                TestSecrets.envelope().seal(PostgresMfaRepository.context(factorId, subjectId, "secret"), "SECRET32"),
+                TestSecrets.envelope().seal(PostgresMfaRepository.context(factorId, subjectId, "pending_secret"), "PENDING"),
+                true, now, now, now, now
         };
         List<Object[]> rows = new ArrayList<>();
         rows.add(rowData);
@@ -86,6 +94,48 @@ class PostgresMfaRepositoryTest {
         assertThat(record.enabled()).isTrue();
         assertThat(record.enrolledAt()).isEqualTo(now);
         assertThat(record.lastVerifiedAt()).isEqualTo(now);
+    }
+
+    @Test
+    @DisplayName("a plaintext secret in a stored row is refused, never returned")
+    void plaintextRowRefused() {
+        UUID subjectId = UUID.randomUUID();
+        Instant now = Instant.now();
+        List<Object[]> rows = new ArrayList<>();
+        rows.add(new Object[]{UUID.randomUUID(), subjectId, "JBSWY3DPEHPK3PXP", null, true, now, now, now, now});
+        tx.queryResultSupplier = () -> new StubQueryResult(rows);
+
+        assertThatThrownBy(() -> repository.findFactorBySubjectId(subjectId))
+                .isInstanceOf(TotpSecretCustodyException.class);
+    }
+
+    @Test
+    @DisplayName("a secret copied from another row fails authentication")
+    void copiedSecretRefused() {
+        UUID subjectId = UUID.randomUUID();
+        UUID otherFactor = UUID.randomUUID();
+        Instant now = Instant.now();
+        String foreign = TestSecrets.envelope().seal(
+                PostgresMfaRepository.context(otherFactor, subjectId, "secret"), "SECRET32");
+        List<Object[]> rows = new ArrayList<>();
+        rows.add(new Object[]{UUID.randomUUID(), subjectId, foreign, null, true, now, now, now, now});
+        tx.queryResultSupplier = () -> new StubQueryResult(rows);
+
+        assertThatThrownBy(() -> repository.findFactorBySubjectId(subjectId))
+                .isInstanceOf(TotpSecretCustodyException.class);
+    }
+
+    @Test
+    @DisplayName("an absent secret is stored as NULL, not as an empty string")
+    void absentSecretIsNull() {
+        UUID factorId = UUID.randomUUID();
+        Instant now = Instant.now();
+
+        repository.saveFactor(new FactorRecord(factorId, UUID.randomUUID(), null, "PENDING", false, null, null, now, now));
+
+        CapturingStatement stmt = tx.executedStatements.get(0);
+        assertThat(stmt.boundParameters).containsEntry(2, null);
+        assertThat(stmt.boundParameters.get(3)).isNotNull();
     }
 
     @Test

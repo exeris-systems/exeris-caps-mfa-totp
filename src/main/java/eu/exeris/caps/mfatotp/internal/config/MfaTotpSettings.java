@@ -2,6 +2,7 @@ package eu.exeris.caps.mfatotp.internal.config;
 
 import eu.exeris.caps.mfatotp.api.exception.MfaTotpConfigurationException;
 import eu.exeris.caps.mfatotp.internal.crypto.TokenHasher;
+import eu.exeris.caps.mfatotp.internal.custody.SecretKeyring;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -24,6 +25,8 @@ public final class MfaTotpSettings {
 
     public static final String ENV_PEPPER = "EXERIS_MFA_TOTP_PEPPER";
     public static final String ENV_PEPPER_FILE = "EXERIS_MFA_TOTP_PEPPER_FILE";
+    public static final String ENV_KEKS = "EXERIS_MFA_TOTP_KEKS";
+    public static final String ENV_KEKS_FILE = "EXERIS_MFA_TOTP_KEKS_FILE";
     public static final String ENV_CHALLENGE_TTL = "EXERIS_MFA_TOTP_CHALLENGE_TTL";
     public static final String ENV_CHALLENGE_MAX_TTL = "EXERIS_MFA_TOTP_CHALLENGE_MAX_TTL";
 
@@ -31,11 +34,13 @@ public final class MfaTotpSettings {
     public static final Duration DEFAULT_CHALLENGE_MAX_TTL = Duration.ofMinutes(10);
 
     private final byte[] pepper;
+    private final SecretKeyring keyring;
     private final Duration challengeTtl;
     private final Duration challengeMaxTtl;
 
-    MfaTotpSettings(byte[] pepper, Duration challengeTtl, Duration challengeMaxTtl) {
+    MfaTotpSettings(byte[] pepper, SecretKeyring keyring, Duration challengeTtl, Duration challengeMaxTtl) {
         this.pepper = pepper;
+        this.keyring = keyring;
         this.challengeTtl = challengeTtl;
         this.challengeMaxTtl = challengeMaxTtl;
     }
@@ -46,13 +51,16 @@ public final class MfaTotpSettings {
     public static MfaTotpSettings fromEnvironment(Map<String, String> environment) {
         Objects.requireNonNull(environment, "environment must not be null");
         byte[] pepper = decodePepper(secret(environment, ENV_PEPPER, ENV_PEPPER_FILE));
+        SecretKeyring keyring = SecretKeyring.parse(
+                environment.get(ENV_KEKS_FILE) != null && !environment.get(ENV_KEKS_FILE).isBlank() ? ENV_KEKS_FILE : ENV_KEKS,
+                secret(environment, ENV_KEKS, ENV_KEKS_FILE));
         Duration ttl = duration(environment, ENV_CHALLENGE_TTL, DEFAULT_CHALLENGE_TTL);
         Duration maxTtl = duration(environment, ENV_CHALLENGE_MAX_TTL, DEFAULT_CHALLENGE_MAX_TTL);
         if (ttl.compareTo(maxTtl) > 0) {
             throw new MfaTotpConfigurationException(ENV_CHALLENGE_TTL,
                     "the default challenge lifetime exceeds " + ENV_CHALLENGE_MAX_TTL);
         }
-        return new MfaTotpSettings(pepper, ttl, maxTtl);
+        return new MfaTotpSettings(pepper, keyring, ttl, maxTtl);
     }
 
     /** Reads a secret from {@code inlineKey} or from the file named by {@code fileKey}, never both. */
@@ -112,6 +120,11 @@ public final class MfaTotpSettings {
     /** @return a copy of the pepper bytes */
     public byte[] pepper() {
         return pepper.clone();
+    }
+
+    /** @return the keyring that seals TOTP secrets at rest */
+    public SecretKeyring keyring() {
+        return keyring;
     }
 
     public Duration challengeTtl() {

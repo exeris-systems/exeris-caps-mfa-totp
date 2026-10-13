@@ -48,15 +48,36 @@ class MfaTotpSettingsTest {
         Path file = dir.resolve("pepper");
         Files.writeString(file, TestSecrets.pepperBase64() + "\n");
 
-        MfaTotpSettings settings = MfaTotpSettings.fromEnvironment(Map.of(MfaTotpSettings.ENV_PEPPER_FILE, file.toString()));
+        Map<String, String> fromFile = Map.of(
+                MfaTotpSettings.ENV_PEPPER_FILE, file.toString(), MfaTotpSettings.ENV_KEKS, TestSecrets.keyringSpec());
+        MfaTotpSettings settings = MfaTotpSettings.fromEnvironment(fromFile);
         assertThat(settings.pepper()).isEqualTo(TestSecrets.pepperBytes());
 
         Map<String, String> both = new HashMap<>(TestSecrets.environment());
         both.put(MfaTotpSettings.ENV_PEPPER_FILE, file.toString());
         assertThatThrownBy(() -> MfaTotpSettings.fromEnvironment(both)).isInstanceOf(MfaTotpConfigurationException.class);
-        assertThatThrownBy(() -> MfaTotpSettings.fromEnvironment(
-                Map.of(MfaTotpSettings.ENV_PEPPER_FILE, dir.resolve("missing").toString())))
+        assertThatThrownBy(() -> MfaTotpSettings.fromEnvironment(Map.of(
+                MfaTotpSettings.ENV_PEPPER_FILE, dir.resolve("missing").toString(),
+                MfaTotpSettings.ENV_KEKS, TestSecrets.keyringSpec())))
                 .isInstanceOf(MfaTotpConfigurationException.class);
+    }
+
+    @Test
+    @DisplayName("the key-encryption keyring is required, inline or from a file, never both")
+    void keyringRequired(@TempDir Path dir) throws IOException {
+        Map<String, String> pepperOnly = Map.of(MfaTotpSettings.ENV_PEPPER, TestSecrets.pepperBase64());
+        assertThatThrownBy(() -> MfaTotpSettings.fromEnvironment(pepperOnly))
+                .isInstanceOf(MfaTotpConfigurationException.class)
+                .hasMessageContaining(MfaTotpSettings.ENV_KEKS);
+
+        Path file = dir.resolve("keks");
+        Files.writeString(file, TestSecrets.keyringSpec());
+        Map<String, String> fromFile = new HashMap<>(pepperOnly);
+        fromFile.put(MfaTotpSettings.ENV_KEKS_FILE, file.toString());
+        assertThat(MfaTotpSettings.fromEnvironment(fromFile).keyring().activeId()).isEqualTo("k1");
+
+        fromFile.put(MfaTotpSettings.ENV_KEKS, TestSecrets.keyringSpec());
+        assertThatThrownBy(() -> MfaTotpSettings.fromEnvironment(fromFile)).isInstanceOf(MfaTotpConfigurationException.class);
     }
 
     @Test

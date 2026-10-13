@@ -13,6 +13,7 @@ import eu.exeris.caps.mfatotp.internal.DefaultTotpVerifier;
 import eu.exeris.caps.mfatotp.internal.audit.MfaAuditBridge;
 import eu.exeris.caps.mfatotp.internal.config.MfaTotpSettings;
 import eu.exeris.caps.mfatotp.internal.crypto.TokenHasher;
+import eu.exeris.caps.mfatotp.internal.custody.TotpSecretEnvelope;
 import eu.exeris.caps.mfatotp.internal.repository.MfaRepository;
 import eu.exeris.caps.mfatotp.internal.repository.PostgresMfaRepository;
 import eu.exeris.kernel.spi.persistence.TransactionalExecutor;
@@ -110,9 +111,14 @@ public final class MfaTotpModule implements CapabilityLifecycleHooks {
             AuditLogSink auditLogSink,
             String issuer
     ) {
+        this(MfaTotpSettings.fromEnvironment(environment), tx, auditLogSink, issuer);
+    }
+
+    private MfaTotpModule(MfaTotpSettings settings, TransactionalExecutor tx, AuditLogSink auditLogSink, String issuer) {
         this(
-                MfaTotpSettings.fromEnvironment(environment),
-                new PostgresMfaRepository(Objects.requireNonNull(tx, "tx must not be null")),
+                settings,
+                new PostgresMfaRepository(Objects.requireNonNull(tx, "tx must not be null"),
+                        new TotpSecretEnvelope(settings.keyring())),
                 auditLogSink != null ? new MfaAuditBridge(auditLogSink) : null,
                 issuer,
                 Clock.systemUTC()

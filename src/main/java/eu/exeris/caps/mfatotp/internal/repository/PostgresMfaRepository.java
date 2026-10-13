@@ -1,22 +1,46 @@
 package eu.exeris.caps.mfatotp.internal.repository;
 
+import eu.exeris.caps.mfatotp.internal.custody.TotpSecretEnvelope;
 import eu.exeris.kernel.spi.persistence.PersistenceStatement;
 import eu.exeris.kernel.spi.persistence.QueryResult;
 import eu.exeris.kernel.spi.persistence.RowCursor;
 import eu.exeris.kernel.spi.persistence.TransactionalExecutor;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public final class PostgresMfaRepository implements MfaRepository {
 
-    private final TransactionalExecutor tx;
+    private static final String COL_SECRET = "secret";
+    private static final String COL_PENDING = "pending_secret";
 
-    public PostgresMfaRepository(TransactionalExecutor tx) {
+    private final TransactionalExecutor tx;
+    private final TotpSecretEnvelope envelope;
+
+    public PostgresMfaRepository(TransactionalExecutor tx, TotpSecretEnvelope envelope) {
         this.tx = Objects.requireNonNull(tx, "TransactionalExecutor must not be null");
+        this.envelope = Objects.requireNonNull(envelope, "envelope must not be null");
+    }
+
+    /**
+     * The associated data of a sealed column: the row, its subject and the column, so a sealed value
+     * opens only where it was written.
+     */
+    static String context(UUID factorId, UUID subjectId, String column) {
+        return "mfa_factors/" + factorId + "/" + subjectId + "/" + column;
+    }
+
+    private String sealOrNull(UUID factorId, UUID subjectId, String column, String plain) {
+        return plain == null || plain.isEmpty() ? null : envelope.seal(context(factorId, subjectId, column), plain);
+    }
+
+    private String openOrNull(UUID factorId, UUID subjectId, String column, String sealed) {
+        return sealed == null ? null : envelope.open(context(factorId, subjectId, column), sealed);
     }
 
     @Override
@@ -32,11 +56,13 @@ public final class PostgresMfaRepository implements MfaRepository {
                 try (QueryResult rs = stmt.executeQuery()) {
                     if (rs.next()) {
                         RowCursor row = rs.row();
+                        UUID id = row.getUuid(0);
+                        UUID subject = row.getUuid(1);
                         return Optional.of(new FactorRecord(
-                                row.getUuid(0),
-                                row.getUuid(1),
-                                row.getString(2),
-                                row.getString(3),
+                                id,
+                                subject,
+                                openOrNull(id, subject, COL_SECRET, row.isNull(2) ? null : row.getString(2)),
+                                openOrNull(id, subject, COL_PENDING, row.isNull(3) ? null : row.getString(3)),
                                 row.getBoolean(4),
                                 row.getInstant(5),
                                 row.getInstant(6),
@@ -67,9 +93,9 @@ public final class PostgresMfaRepository implements MfaRepository {
             try (PersistenceStatement stmt = conn.prepare(sql)) {
                 stmt.bindUuid(0, record.id())
                     .bindUuid(1, record.subjectId())
-                    .bindString(2, record.secret())
-                    .bindString(3, record.pendingSecret() != null ? record.pendingSecret() : "")
                     .bindBoolean(4, record.enabled());
+                bindSealed(stmt, 2, sealOrNull(record.id(), record.subjectId(), COL_SECRET, record.secret()));
+                bindSealed(stmt, 3, sealOrNull(record.id(), record.subjectId(), COL_PENDING, record.pendingSecret()));
 
                 if (record.enrolledAt() != null) {
                     stmt.bindInstant(5, record.enrolledAt());
@@ -292,5 +318,53 @@ public final class PostgresMfaRepository implements MfaRepository {
             }
         });
         return affected != null && affected > 0;
+    }
+
+    /**
+     * Re-seals every stored secret under the active key of the keyring, so that an older key can be
+     * dropped from it. Each secret is opened (and so authenticated) before it is sealed again; a row that
+     * cannot be opened aborts the whole unit and leaves the table untouched.
+     *
+     * @return the number of factors re-sealed
+     */
+    public int resealWithActiveKey() {
+        AtomicInteger resealed = new AtomicInteger();
+        tx.executeManaged(conn -> {
+            resealed.set(0);
+            List<String[]> rows = new ArrayList<>();
+            try (PersistenceStatement stmt = conn.prepare(
+                    "SELECT id, subject_id, secret, pending_secret FROM mfa_factors ORDER BY id FOR UPDATE");
+                 QueryResult rs = stmt.executeQuery()) {
+                while (rs.next()) {
+                    RowCursor row = rs.row();
+                    rows.add(new String[]{
+                            row.getUuid(0).toString(), row.getUuid(1).toString(),
+                            row.isNull(2) ? null : row.getString(2), row.isNull(3) ? null : row.getString(3)});
+                }
+            }
+            for (String[] row : rows) {
+                UUID id = UUID.fromString(row[0]);
+                UUID subject = UUID.fromString(row[1]);
+                String secret = sealOrNull(id, subject, COL_SECRET, openOrNull(id, subject, COL_SECRET, row[2]));
+                String pending = sealOrNull(id, subject, COL_PENDING, openOrNull(id, subject, COL_PENDING, row[3]));
+                try (PersistenceStatement stmt = conn.prepare(
+                        "UPDATE mfa_factors SET secret = $1, pending_secret = $2 WHERE id = $3")) {
+                    bindSealed(stmt, 0, secret);
+                    bindSealed(stmt, 1, pending);
+                    stmt.bindUuid(2, id);
+                    stmt.executeUpdate();
+                }
+                resealed.incrementAndGet();
+            }
+        });
+        return resealed.get();
+    }
+
+    private static void bindSealed(PersistenceStatement stmt, int index, String sealed) {
+        if (sealed == null) {
+            stmt.bindNull(index);
+        } else {
+            stmt.bindString(index, sealed);
+        }
     }
 }

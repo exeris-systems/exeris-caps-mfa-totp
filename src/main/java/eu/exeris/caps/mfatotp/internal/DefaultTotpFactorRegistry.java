@@ -52,10 +52,10 @@ public final class DefaultTotpFactorRegistry implements TotpFactorRegistry {
         Instant now = Instant.now();
 
         FactorRecord record = existing.map(rec -> new FactorRecord(
-                rec.id(), subjectId, rec.secret() != null ? rec.secret() : "", pendingSecret,
+                rec.id(), subjectId, rec.secret(), pendingSecret,
                 false, null, null, rec.createdAt(), now
         )).orElseGet(() -> new FactorRecord(
-                UUID.randomUUID(), subjectId, "", pendingSecret,
+                UUID.randomUUID(), subjectId, null, pendingSecret,
                 false, null, null, now, now
         ));
 
