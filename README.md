@@ -36,7 +36,7 @@ Set exactly one of each inline/file pair. The pepper and each key must come from
 ## Security notes
 
 - **Hashed:** recovery codes and challenge tokens are stored as HMAC-SHA256 under the pepper. A database read yields no usable code or token. Rotating the pepper invalidates every stored recovery code and open challenge.
-- **Sealed:** a TOTP seed cannot be hashed, so `mfa_factors.secret` and `pending_secret` hold AES-256-GCM envelopes. An envelope names the key that sealed it and is bound to its row id, subject and column, so a value copied to another row or column fails authentication. The first keyring entry seals; the others only open. To rotate a key, prepend the new entry, call `PostgresMfaRepository.resealWithActiveKey()`, then remove the old entry. A stored value that is not an envelope, names an unknown key or fails authentication throws `TotpSecretCustodyException`; nothing falls back to plaintext.
+- **Sealed:** a TOTP seed cannot be hashed, so `mfa_factors.secret` and `pending_secret` hold AES-256-GCM envelopes. An envelope names the key that sealed it and is bound to its row id, subject and column, so a value copied to another row or column fails authentication. The first keyring entry seals; the others only open. To rotate a key, prepend the new entry, call `MfaTotpModule.resealWithActiveKey()` (it returns the number of factors re-sealed), then remove the old entry. A stored value that is not an envelope, names an unknown key or fails authentication throws `TotpSecretCustodyException`; nothing falls back to plaintext.
 - **Not covered:** the seed is plaintext in the process while a code is checked, and in the enrolment response that shows it to the user once.
 
 ## Build & test

@@ -6,6 +6,7 @@ import eu.exeris.caps.mfatotp.api.RecoveryCodes;
 import eu.exeris.caps.mfatotp.api.TotpFactorRegistry;
 import eu.exeris.caps.mfatotp.api.TotpVerifier;
 import eu.exeris.caps.mfatotp.api.exception.MfaTotpConfigurationException;
+import eu.exeris.caps.mfatotp.api.exception.TotpSecretCustodyException;
 import eu.exeris.caps.mfatotp.internal.DefaultMfaChallenge;
 import eu.exeris.caps.mfatotp.internal.DefaultRecoveryCodes;
 import eu.exeris.caps.mfatotp.internal.DefaultTotpFactorRegistry;
@@ -71,6 +72,7 @@ public final class MfaTotpModule implements CapabilityLifecycleHooks {
     private final TotpVerifier totpVerifier;
     private final RecoveryCodes recoveryCodes;
     private final MfaChallenge mfaChallenge;
+    private final MfaRepository repository;
 
     private final AtomicBoolean initialized = new AtomicBoolean(false);
     private final AtomicBoolean ready = new AtomicBoolean(false);
@@ -84,6 +86,7 @@ public final class MfaTotpModule implements CapabilityLifecycleHooks {
         this.totpVerifier = null;
         this.recoveryCodes = null;
         this.mfaChallenge = null;
+        this.repository = null;
     }
 
     /**
@@ -136,6 +139,7 @@ public final class MfaTotpModule implements CapabilityLifecycleHooks {
         Objects.requireNonNull(settings, "settings must not be null");
         Objects.requireNonNull(repository, "repository must not be null");
         Objects.requireNonNull(clock, "clock must not be null");
+        this.repository = repository;
         TokenHasher hasher = new TokenHasher(settings.pepper());
         DefaultTotpVerifier verifier = new DefaultTotpVerifier(repository, auditBridge, 1, 30, 6, clock);
         this.totpVerifier = verifier;
@@ -151,6 +155,20 @@ public final class MfaTotpModule implements CapabilityLifecycleHooks {
                     + "the composing SKU supplies them through the wiring constructor");
         }
         return service;
+    }
+
+    /**
+     * Re-seals every stored TOTP secret under the active key of the keyring, so an older key can be removed
+     * from it. To rotate a key: prepend the new entry to the keyring, restart with it, call this, then
+     * remove the old entry. Each secret is opened, and so authenticated, before it is sealed again; a
+     * secret that cannot be opened aborts the whole unit and leaves every row unchanged.
+     *
+     * @return the number of factors re-sealed
+     * @throws IllegalStateException    on the lifecycle-only instance, which carries no store
+     * @throws TotpSecretCustodyException when a stored secret cannot be opened under the keyring
+     */
+    public int resealWithActiveKey() {
+        return wired(repository).resealWithActiveKey();
     }
 
     public TotpFactorRegistry getTotpFactorRegistry() {

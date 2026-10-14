@@ -368,6 +368,7 @@ public final class PostgresMfaRepository implements MfaRepository {
      *
      * @return the number of factors re-sealed
      */
+    @Override
     public int resealWithActiveKey() {
         AtomicInteger resealed = new AtomicInteger();
         tx.executeManaged(conn -> {

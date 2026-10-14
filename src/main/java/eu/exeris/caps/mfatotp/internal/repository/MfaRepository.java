@@ -35,4 +35,14 @@ public interface MfaRepository {
     Optional<ChallengeRecord> findChallengeByHash(String tokenHash);
     void incrementChallengeFailures(UUID challengeId);
     boolean consumeChallenge(UUID challengeId, Instant consumedAt);
+
+    // Custody operations
+
+    /**
+     * Re-seals every stored TOTP secret under the active key of the keyring, so an older key can be dropped
+     * from it. A store that seals nothing returns 0.
+     *
+     * @return the number of factors re-sealed
+     */
+    int resealWithActiveKey();
 }

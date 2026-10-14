@@ -10,6 +10,12 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public final class InMemoryMfaRepository implements MfaRepository {
 
+    /** Holds secrets in the clear, so there is nothing to re-seal. */
+    @Override
+    public int resealWithActiveKey() {
+        return 0;
+    }
+
     private final Map<UUID, FactorRecord> factorsBySubject = new ConcurrentHashMap<>();
     private final Map<String, RecoveryCodeRecord> recoveryCodesByHash = new ConcurrentHashMap<>();
     private final Map<String, ChallengeRecord> challengesByHash = new ConcurrentHashMap<>();

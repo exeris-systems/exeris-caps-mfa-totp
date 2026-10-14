@@ -4,12 +4,14 @@ import eu.exeris.caps.mfatotp.api.exception.MfaTotpConfigurationException;
 import eu.exeris.caps.mfatotp.internal.TestSecrets;
 import eu.exeris.caps.mfatotp.internal.config.MfaTotpSettings;
 import eu.exeris.caps.mfatotp.internal.repository.InMemoryMfaRepository;
+import eu.exeris.caps.mfatotp.internal.repository.MfaRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import eu.exeris.kernel.spi.persistence.PersistenceConnection;
 import eu.exeris.kernel.spi.persistence.TransactionIsolation;
 import eu.exeris.kernel.spi.persistence.TransactionalExecutor;
+import java.lang.reflect.Proxy;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.Map;
@@ -63,6 +65,28 @@ class MfaTotpModuleTest {
         assertThatThrownBy(() -> new MfaTotpModule(Map.<String, String>of(), new NoopExecutor(), null, "Exeris"))
                 .isInstanceOf(MfaTotpConfigurationException.class)
                 .hasMessageContaining(MfaTotpSettings.ENV_PEPPER);
+    }
+
+    @Test
+    @DisplayName("resealWithActiveKey delegates to the store and returns the number re-sealed")
+    void resealDelegatesToTheStore() {
+        MfaRepository inMemory = new InMemoryMfaRepository();
+        MfaRepository resealing = (MfaRepository) Proxy.newProxyInstance(
+                MfaRepository.class.getClassLoader(), new Class<?>[] {MfaRepository.class},
+                (proxy, method, args) -> method.getName().equals("resealWithActiveKey")
+                        ? 3
+                        : method.invoke(inMemory, args));
+        MfaTotpModule module = new MfaTotpModule(MfaTotpSettings.fromEnvironment(TestSecrets.environment()),
+                resealing, null, "Exeris", Clock.systemUTC());
+
+        assertThat(module.resealWithActiveKey()).isEqualTo(3);
+    }
+
+    @Test
+    @DisplayName("resealWithActiveKey fails on the lifecycle-only instance")
+    void resealRequiresWiring() {
+        assertThatThrownBy(() -> new MfaTotpModule().resealWithActiveKey())
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
