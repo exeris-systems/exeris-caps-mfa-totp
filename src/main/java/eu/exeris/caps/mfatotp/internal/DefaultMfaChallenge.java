@@ -35,6 +35,8 @@ public final class DefaultMfaChallenge implements MfaChallenge {
     }
 
     /**
+     * Creates the service over a repository, with an explicit attempt limit, lifetimes and clock.
+     *
      * @param defaultTtl lifetime of a challenge issued without one
      * @param maxTtl     upper bound on any lifetime; a longer request is clamped to it
      */

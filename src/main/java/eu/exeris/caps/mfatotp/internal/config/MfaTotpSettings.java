@@ -46,6 +46,8 @@ public final class MfaTotpSettings {
     }
 
     /**
+     * Reads and validates the configuration from environment-style key/value pairs.
+     *
      * @throws MfaTotpConfigurationException when a required value is absent or any value is malformed
      */
     public static MfaTotpSettings fromEnvironment(Map<String, String> environment) {
@@ -117,12 +119,12 @@ public final class MfaTotpSettings {
         }
     }
 
-    /** @return a copy of the pepper bytes */
+    /** Returns a defensive copy of the pepper bytes. */
     public byte[] pepper() {
         return pepper.clone();
     }
 
-    /** @return the keyring that seals TOTP secrets at rest */
+    /** Returns the keyring that seals TOTP secrets at rest. */
     public SecretKeyring keyring() {
         return keyring;
     }

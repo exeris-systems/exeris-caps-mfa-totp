@@ -90,7 +90,7 @@ public final class SecretKeyring {
         return decoded;
     }
 
-    /** @return the id of the key that seals new envelopes */
+    /** Returns the id of the key that seals new envelopes. */
     public String activeId() {
         return activeId;
     }

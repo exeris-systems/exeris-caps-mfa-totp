@@ -103,12 +103,12 @@ public final class TotpSecretEnvelope {
         }
     }
 
-    /** @return the id of the key that seals new envelopes */
+    /** Returns the id of the key that seals new envelopes. */
     public String activeKeyId() {
         return keyring.activeId();
     }
 
-    /** @return the key id an envelope names, or {@code null} when the text is not an envelope */
+    /** Returns the key id an envelope names, or {@code null} when the text is not an envelope. */
     public static String keyIdOf(String sealedText) {
         byte[] sealed = decodeOrNull(sealedText);
         if (sealed == null) {

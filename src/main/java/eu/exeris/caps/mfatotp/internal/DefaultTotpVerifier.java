@@ -26,6 +26,8 @@ public final class DefaultTotpVerifier implements TotpVerifier {
     }
 
     /**
+     * Creates a verifier with an explicit tolerance window, time step, digit count and clock.
+     *
      * @throws IllegalArgumentException when the window is negative, the step is not positive, or the digits
      *                                  are not between 1 and 8
      */
@@ -76,6 +78,8 @@ public final class DefaultTotpVerifier implements TotpVerifier {
     }
 
     /**
+     * Finds the time step at which a code is valid, without consuming it.
+     *
      * @return the time step at which {@code code} is valid for the secret now, or empty
      */
     public OptionalLong matchStep(String base32Secret, String code) {

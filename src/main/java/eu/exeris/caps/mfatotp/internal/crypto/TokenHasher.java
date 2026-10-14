@@ -27,6 +27,8 @@ public final class TokenHasher {
     private final SecretKeySpec key;
 
     /**
+     * Creates a hasher keyed by the pepper.
+     *
      * @param pepper at least {@value #MIN_PEPPER_BYTES} bytes
      * @throws IllegalArgumentException when the pepper is shorter
      */
@@ -40,6 +42,8 @@ public final class TokenHasher {
     }
 
     /**
+     * Hashes the input under the pepper with no salt.
+     *
      * @param raw input string; non-null
      * @return 64-character lowercase hex string
      */
@@ -48,6 +52,8 @@ public final class TokenHasher {
     }
 
     /**
+     * Hashes the input under the pepper, prefixed by an optional salt.
+     *
      * @param raw  input string; non-null
      * @param salt optional context prefix (e.g. the subject id)
      * @return 64-character lowercase hex string
