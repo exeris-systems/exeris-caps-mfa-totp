@@ -9,7 +9,7 @@ import java.util.Objects;
 
 /**
  * Keyed hashing of recovery codes and challenge tokens: HMAC-SHA256 under a deployment-supplied
- * pepper of at least {@value TokenHasherLimits#MIN_PEPPER_BYTES} bytes. A stored digest is useless
+ * pepper of at least {@value #MIN_PEPPER_BYTES} bytes. A stored digest is useless
  * without the pepper, which lives outside the database; there is no built-in pepper.
  *
  * <p>{@link #hashWithSalt} prefixes the input with a caller-supplied context (the subject id)
@@ -27,7 +27,7 @@ public final class TokenHasher {
     private final SecretKeySpec key;
 
     /**
-     * @param pepper at least {@value TokenHasherLimits#MIN_PEPPER_BYTES} bytes
+     * @param pepper at least {@value #MIN_PEPPER_BYTES} bytes
      * @throws IllegalArgumentException when the pepper is shorter
      */
     public TokenHasher(byte[] pepper) {
