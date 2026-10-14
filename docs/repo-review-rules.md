@@ -4,7 +4,7 @@ type: reference
 visibility: public
 owning-repo: exeris-caps-mfa-totp
 status: active
-last-verified: 2026-10-13
+last-verified: 2026-10-14
 ---
 
 # Review rules for `exeris-caps-mfa-totp`
@@ -110,9 +110,11 @@ S11. **A challenge is short-lived and sits between the password check and the se
     (`MfaChallenge`, `IssuedChallenge`). A challenge with no expiry, or a challenge that can be
     issued for a subject whose password check has not succeeded → `[HARD BLOCK]`.
 
-S12. **Storage honours the README.** In-memory unless a `TransactionalExecutor` is supplied, then
-    PostgreSQL, with the DDL in `src/main/resources/schema/mfa-totp-schema.sql` applied by the SKU.
-    A change to a stored column that leaves that file unchanged → `[CONTRACT]`.
+S12. **Storage honours the README.** The wired module requires a `TransactionalExecutor` and stores in
+    PostgreSQL; there is no in-memory store in `src/main`. The DDL is
+    `src/main/resources/db/migration/exeris-caps-mfa-totp/V1__create_mfa_totp.sql`, listed in
+    `MfaTotpModule.MIGRATIONS` and applied by the SKU. A change to a stored column that leaves that file
+    unchanged → `[CONTRACT]`.
 
 ## Where this does not apply, and what it costs
 
