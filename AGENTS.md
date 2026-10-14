@@ -4,7 +4,7 @@ type: reference
 visibility: public
 owning-repo: exeris-caps-mfa-totp
 status: active
-last-verified: 2026-10-13
+last-verified: 2026-10-14
 ---
 
 # exeris-caps-mfa-totp
