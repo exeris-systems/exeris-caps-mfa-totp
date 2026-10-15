@@ -23,11 +23,11 @@ Each item is a property that the Identity SKU (ADR-099) relies on and that the c
 
 [#12](https://github.com/exeris-systems/exeris-caps-mfa-totp/issues/12). `MfaChallenge.issue` mints a challenge for any subject it is asked about, and nothing in the call carries evidence of a successful password check. Rule S11 requires that a challenge cannot be issued for a subject whose password check has not succeeded, so today the property rests on the calling code, and the README records it as a limit. A caller that skips the password step reaches the second factor with a valid challenge. The change reshapes the signature of `issue` (a receipt from a credential store, or a service contract that `issue` calls), which is cheaper before release than after. Code: `src/main/java/eu/exeris/caps/mfatotp/api/MfaChallenge.java`, `src/main/java/eu/exeris/caps/mfatotp/internal/DefaultMfaChallenge.java`.
 
+## Later
+
 ### Attempt limiting is the caller's duty
 
-[#13](https://github.com/exeris-systems/exeris-caps-mfa-totp/issues/13). `TotpVerifier.verify` and `RecoveryCodes.verifyAndConsume` keep no failure counter and are not bound to a challenge. The limit lives in `MfaChallenge` (`maxAttempts`, default 5) and applies only when the caller validates the challenge, calls `recordFailure` on every failure and calls `consume` on success. A caller that omits the sequence can try all of the six-digit codes of a factor. `recordFailure` also increments a challenge that is consumed or expired. The fix is a verification entry point that charges each attempt to a challenge in one unit, and it should land in the same contract change as the receipt above. Code: `src/main/java/eu/exeris/caps/mfatotp/internal/DefaultTotpVerifier.java`, `src/main/java/eu/exeris/caps/mfatotp/internal/DefaultRecoveryCodes.java`, `src/main/java/eu/exeris/caps/mfatotp/internal/DefaultMfaChallenge.java`.
-
-## Later
+`TotpVerifier.verify` and `RecoveryCodes.verifyAndConsume` keep no failure counter and are not bound to a challenge. The limit lives in `MfaChallenge` (`maxAttempts`, default 5) and applies only when the caller validates the challenge, calls `recordFailure` on every failure and calls `consume` on success. A caller that omits the sequence can try all of the six-digit codes of a factor. `recordFailure` also increments a challenge that is consumed or expired. Attempt limiting belongs with the rate-limiting capability and the composition of the SKU, which decide the budget per subject, address and window; the counter of this capability is one input to that policy. Waits on: the rate-limiting capability and the Identity SKU's composition, then a verification entry point that charges each attempt to a challenge in one unit, which can share a contract change with the receipt above. Code: `src/main/java/eu/exeris/caps/mfatotp/internal/DefaultTotpVerifier.java`, `src/main/java/eu/exeris/caps/mfatotp/internal/DefaultRecoveryCodes.java`, `src/main/java/eu/exeris/caps/mfatotp/internal/DefaultMfaChallenge.java`.
 
 ### Take `TransactionalExecutor` from the kernel instead of the constructor
 
@@ -43,7 +43,7 @@ Each item is a property that the Identity SKU (ADR-099) relies on and that the c
 
 ### Challenge hygiene
 
-Nothing deletes consumed or expired rows of `mfa_challenges`, so the table grows with every login, and `issue` does not invalidate a subject's earlier open challenges, so a subject can hold several live tokens each with its own attempt budget. The first costs storage and index size, the second multiplies the guesses available to an attacker who can trigger challenges. Waits on: the attempt-limiting change above, because the budget may move from the challenge to the subject. Code: `src/main/java/eu/exeris/caps/mfatotp/internal/repository/PostgresMfaRepository.java`, `src/main/java/eu/exeris/caps/mfatotp/internal/DefaultMfaChallenge.java`.
+Nothing deletes consumed or expired rows of `mfa_challenges`, so the table grows with every login, and `issue` does not invalidate a subject's earlier open challenges, so a subject can hold several live tokens each with its own attempt budget. The first costs storage and index size, the second multiplies the guesses available to an attacker who can trigger challenges. Waits on: the attempt-limiting item above, because the budget may move from the challenge to the subject. Code: `src/main/java/eu/exeris/caps/mfatotp/internal/repository/PostgresMfaRepository.java`, `src/main/java/eu/exeris/caps/mfatotp/internal/DefaultMfaChallenge.java`.
 
 ### Pepper keyring
 
