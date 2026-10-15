@@ -13,6 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -22,12 +23,15 @@ class DefaultMfaChallengeTest {
 
     private MfaRepository repository;
     private MfaChallenge mfaChallenge;
+    private MutableClock clock;
     private UUID subjectId;
 
     @BeforeEach
     void setUp() {
         repository = new InMemoryMfaRepository();
-        mfaChallenge = new DefaultMfaChallenge(repository, null, 3);
+        clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+        mfaChallenge = new DefaultMfaChallenge(repository, TestSecrets.hasher(), null, 3,
+                Duration.ofMinutes(5), Duration.ofMinutes(10), clock);
         subjectId = UUID.randomUUID();
     }
 
@@ -74,9 +78,40 @@ class DefaultMfaChallengeTest {
     @Test
     @DisplayName("Expired challenge throws ChallengeExpiredException")
     void testChallengeExpiration() {
-        IssuedChallenge issued = mfaChallenge.issue(subjectId, Duration.ofMillis(-100)); // already expired
+        IssuedChallenge issued = mfaChallenge.issue(subjectId, Duration.ofMinutes(1));
+        clock.advance(Duration.ofSeconds(59));
+        assertThat(mfaChallenge.validate(issued.challengeToken()).consumed()).isFalse();
 
+        clock.advance(Duration.ofSeconds(2));
         assertThatThrownBy(() -> mfaChallenge.validate(issued.challengeToken()))
                 .isInstanceOf(ChallengeExpiredException.class);
+    }
+
+    @Test
+    @DisplayName("A non-positive ttl is refused and a missing one takes the default")
+    void testNonPositiveTtlRefused() {
+        assertThatThrownBy(() -> mfaChallenge.issue(subjectId, Duration.ZERO)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> mfaChallenge.issue(subjectId, Duration.ofMillis(-100)))
+                .isInstanceOf(IllegalArgumentException.class);
+
+        IssuedChallenge issued = mfaChallenge.issue(subjectId, null);
+        assertThat(issued.expiresAt()).isEqualTo(clock.instant().plus(Duration.ofMinutes(5)));
+    }
+
+    @Test
+    @DisplayName("A ttl above the configured maximum is clamped to it")
+    void testTtlClampedToMaximum() {
+        IssuedChallenge issued = mfaChallenge.issue(subjectId, Duration.ofDays(365));
+
+        assertThat(issued.expiresAt()).isEqualTo(clock.instant().plus(Duration.ofMinutes(10)));
+    }
+
+    @Test
+    @DisplayName("A default lifetime above the maximum, or a non-positive limit, is refused at construction")
+    void testConstructionValidated() {
+        assertThatThrownBy(() -> new DefaultMfaChallenge(repository, TestSecrets.hasher(), null, 3,
+                Duration.ofMinutes(20), Duration.ofMinutes(10), clock)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new DefaultMfaChallenge(repository, TestSecrets.hasher(), null, 0,
+                Duration.ofMinutes(5), Duration.ofMinutes(10), clock)).isInstanceOf(IllegalArgumentException.class);
     }
 }

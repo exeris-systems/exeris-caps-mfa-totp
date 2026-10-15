@@ -6,6 +6,7 @@ import java.nio.ByteBuffer;
 import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.util.Objects;
+import java.util.OptionalLong;
 
 /**
  * Pure Java implementation of RFC 6238 (TOTP) and RFC 4226 (HOTP).
@@ -38,6 +39,7 @@ public final class Rfc6238Totp {
      */
     public static String generateCode(String base32Secret, long epochSeconds, int timeStepSeconds, int digits) {
         Objects.requireNonNull(base32Secret, "base32Secret must not be null");
+        requireParameters(timeStepSeconds, digits, 0);
         byte[] key = Base32.decode(base32Secret);
         long counter = Math.floorDiv(epochSeconds, timeStepSeconds);
         return computeHotp(key, counter, digits);
@@ -54,33 +56,66 @@ public final class Rfc6238Totp {
             int digits,
             int windowTolerance
     ) {
+        return matchingCounter(base32Secret, code, epochSeconds, timeStepSeconds, digits, windowTolerance).isPresent();
+    }
+
+    /**
+     * Finds the time step, within the window around {@code epochSeconds}, at which {@code code} is the
+     * valid code. Callers that must accept a code once record this step and refuse any step not greater
+     * than the last one recorded (RFC 6238 section 5.2).
+     *
+     * @return the matching step, or empty when no step in the window matches
+     */
+    public static OptionalLong matchingCounter(
+            String base32Secret,
+            String code,
+            long epochSeconds,
+            int timeStepSeconds,
+            int digits,
+            int windowTolerance
+    ) {
+        requireParameters(timeStepSeconds, digits, windowTolerance);
         if (base32Secret == null || code == null) {
-            return false;
+            return OptionalLong.empty();
         }
         String cleanCode = code.trim();
         if (cleanCode.length() != digits) {
-            return false;
+            return OptionalLong.empty();
         }
 
         byte[] key;
         try {
             key = Base32.decode(base32Secret);
         } catch (IllegalArgumentException e) {
-            return false;
+            return OptionalLong.empty();
         }
         if (key.length == 0) {
-            return false;
+            return OptionalLong.empty();
         }
 
         long currentCounter = Math.floorDiv(epochSeconds, timeStepSeconds);
+        OptionalLong match = OptionalLong.empty();
+        // Every step of the window is compared, so the time taken does not reveal which one matched.
         for (int i = -windowTolerance; i <= windowTolerance; i++) {
             long counter = currentCounter + i;
-            String expected = computeHotp(key, counter, digits);
-            if (constantTimeEquals(expected, cleanCode)) {
-                return true;
+            if (constantTimeEquals(computeHotp(key, counter, digits), cleanCode)) {
+                match = OptionalLong.of(counter);
             }
         }
-        return false;
+        return match;
+    }
+
+    /** Validates the parameters shared by generation and verification. */
+    public static void requireParameters(int timeStepSeconds, int digits, int windowTolerance) {
+        if (timeStepSeconds <= 0) {
+            throw new IllegalArgumentException("timeStepSeconds must be positive");
+        }
+        if (digits < 1 || digits >= DIGIT_MODULO.length) {
+            throw new IllegalArgumentException("digits must be between 1 and " + (DIGIT_MODULO.length - 1));
+        }
+        if (windowTolerance < 0) {
+            throw new IllegalArgumentException("windowTolerance must not be negative");
+        }
     }
 
     public static String computeHotp(byte[] key, long counter, int digits) {
