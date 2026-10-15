@@ -7,6 +7,9 @@ import java.util.UUID;
 
 /**
  * Service for generating, storing (hashed), verifying and consuming single-use recovery codes.
+ *
+ * <p>Codes carry 128 bits of entropy, but this service keeps no failure counter: bounding failed attempts is
+ * the caller's obligation, through {@link MfaChallenge#recordFailure}.
  */
 public interface RecoveryCodes {
 

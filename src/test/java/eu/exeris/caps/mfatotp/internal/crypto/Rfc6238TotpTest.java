@@ -6,11 +6,12 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class Rfc6238TotpTest {
 
     @Test
-    @DisplayName("RFC 6238 / RFC 4226 test vectors with HMAC-SHA1")
+    @DisplayName("RFC 4226 HOTP test vectors with HMAC-SHA1")
     void testHotpTestVectors() {
         // RFC 4226 test secret: "12345678901234567890" (20 bytes ASCII)
         byte[] secret = "12345678901234567890".getBytes(StandardCharsets.US_ASCII);
@@ -32,6 +33,44 @@ class Rfc6238TotpTest {
             String code = Rfc6238Totp.computeHotp(secret, i, 6);
             assertThat(code).isEqualTo(expectedHotp[i]);
         }
+    }
+
+    @Test
+    @DisplayName("RFC 6238 Appendix B SHA-1 test vectors, 8 digits, 30 s step")
+    void testTotpTestVectors() {
+        String secret = Base32.encode("12345678901234567890".getBytes(StandardCharsets.US_ASCII));
+        long[] times = {59L, 1111111109L, 1111111111L, 1234567890L, 2000000000L, 20000000000L};
+        String[] expected = {"94287082", "07081804", "14050471", "89005924", "69279037", "65353130"};
+
+        for (int i = 0; i < times.length; i++) {
+            assertThat(Rfc6238Totp.generateCode(secret, times[i], 30, 8)).isEqualTo(expected[i]);
+            assertThat(Rfc6238Totp.matchingCounter(secret, expected[i], times[i], 30, 8, 0))
+                    .hasValue(Math.floorDiv(times[i], 30L));
+        }
+    }
+
+    @Test
+    @DisplayName("matchingCounter reports the step the code belongs to within the window")
+    void testMatchingCounter() {
+        String secret = Rfc6238Totp.generateSecret();
+        long now = 1700000000L;
+        String previousStepCode = Rfc6238Totp.generateCode(secret, now - 30, 30, 6);
+
+        assertThat(Rfc6238Totp.matchingCounter(secret, previousStepCode, now, 30, 6, 1))
+                .hasValue(Math.floorDiv(now, 30L) - 1);
+        assertThat(Rfc6238Totp.matchingCounter(secret, previousStepCode, now, 30, 6, 0)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("digits outside 1..8, a non-positive step and a negative window are refused")
+    void testParameterValidation() {
+        String secret = Rfc6238Totp.generateSecret();
+
+        assertThatThrownBy(() -> Rfc6238Totp.generateCode(secret, 0, 30, 9)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Rfc6238Totp.generateCode(secret, 0, 30, 0)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Rfc6238Totp.generateCode(secret, 0, 0, 6)).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> Rfc6238Totp.verifyCode(secret, "123456", 0, 30, 6, -1))
+                .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

@@ -1,61 +1,56 @@
 package eu.exeris.caps.mfatotp.internal.crypto;
 
+import eu.exeris.caps.mfatotp.internal.TestSecrets;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class TokenHasherTest {
 
-    @Test
-    @DisplayName("TokenHasher produces deterministic HMAC-SHA256 lowercase hex string with pepper")
-    void testHashing() {
-        String input = "test-recovery-code-123";
-        String hash1 = TokenHasher.hash(input);
-        String hash2 = TokenHasher.hash(input);
+    private final TokenHasher hasher = TestSecrets.hasher();
 
-        assertThat(hash1).isEqualTo(hash2);
-        assertThat(hash1).hasSize(64);
+    @Test
+    @DisplayName("hash is a deterministic HMAC-SHA256 lowercase hex string")
+    void testHashing() {
+        String hash1 = hasher.hash("test-recovery-code-123");
+
+        assertThat(hash1).isEqualTo(hasher.hash("test-recovery-code-123"));
         assertThat(hash1).matches("^[a-f0-9]{64}$");
     }
 
     @Test
-    @DisplayName("TokenHasher incorporates salt deterministically")
+    @DisplayName("the salt is part of the keyed input")
     void testSaltedHashing() {
         String input = "test-recovery-code-123";
-        String saltA = "user-1";
-        String saltB = "user-2";
 
-        String hashA1 = TokenHasher.hashWithSalt(input, saltA);
-        String hashA2 = TokenHasher.hashWithSalt(input, saltA);
-        String hashB = TokenHasher.hashWithSalt(input, saltB);
-
-        assertThat(hashA1).isEqualTo(hashA2);
-        assertThat(hashA1).isNotEqualTo(hashB);
+        assertThat(hasher.hashWithSalt(input, "user-1")).isEqualTo(hasher.hashWithSalt(input, "user-1"));
+        assertThat(hasher.hashWithSalt(input, "user-1")).isNotEqualTo(hasher.hashWithSalt(input, "user-2"));
+        assertThat(hasher.hashWithSalt(input, "user-1")).isNotEqualTo(hasher.hash(input));
     }
 
     @Test
-    @DisplayName("TokenHasher respects server pepper changes")
-    void testPepperChanges() {
-        String input = "code-val";
-        String hashDefault = TokenHasher.hash(input);
+    @DisplayName("a different pepper yields a different digest")
+    void testPepperChangesDigest() {
+        byte[] other = TestSecrets.pepperBytes();
+        other[0] ^= 0x55;
 
-        TokenHasher.setServerPepper("custom-pepper-key");
-        String hashCustom = TokenHasher.hash(input);
-        assertThat(hashCustom).isNotEqualTo(hashDefault);
-
-        TokenHasher.setServerPepper((String) null); // reset to default
-        String hashReset = TokenHasher.hash(input);
-        assertThat(hashReset).isEqualTo(hashDefault);
+        assertThat(new TokenHasher(other).hash("code-val")).isNotEqualTo(hasher.hash("code-val"));
     }
 
     @Test
-    @DisplayName("TokenHasher generates secure hex of requested byte length")
+    @DisplayName("a pepper shorter than 32 bytes is refused, and there is no default")
+    void testShortPepperRefused() {
+        assertThatThrownBy(() -> new TokenHasher(new byte[31])).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new TokenHasher(new byte[0])).isInstanceOf(IllegalArgumentException.class);
+        assertThatThrownBy(() -> new TokenHasher(null)).isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
+    @DisplayName("generateSecureHex returns the requested byte length hex-encoded")
     void testSecureHex() {
-        String token16 = TokenHasher.generateSecureHex(16);
-        assertThat(token16).hasSize(32);
-
-        String token32 = TokenHasher.generateSecureHex(32);
-        assertThat(token32).hasSize(64);
+        assertThat(TokenHasher.generateSecureHex(16)).hasSize(32);
+        assertThat(TokenHasher.generateSecureHex(32)).hasSize(64);
     }
 }

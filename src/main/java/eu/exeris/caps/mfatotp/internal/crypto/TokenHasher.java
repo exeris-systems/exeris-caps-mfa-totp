@@ -8,78 +8,73 @@ import java.util.HexFormat;
 import java.util.Objects;
 
 /**
- * Token and recovery code hashing with user salt and server pepper protection (ADR-099).
- * Guarantees compliance with ADR-099 Obligation 9 (tokens and codes stored hashed) and
- * protects against offline dictionary and rainbow table attacks.
+ * Keyed hashing of recovery codes and challenge tokens: HMAC-SHA256 under a deployment-supplied
+ * pepper of at least {@value #MIN_PEPPER_BYTES} bytes. A stored digest is useless
+ * without the pepper, which lives outside the database; there is no built-in pepper.
+ *
+ * <p>{@link #hashWithSalt} prefixes the input with a caller-supplied context (the subject id)
+ * and a separator, so the same raw value hashes differently per context; {@link #hash} hashes the
+ * raw value alone.
  *
  * @since 0.1.0
  */
 public final class TokenHasher {
 
+    public static final int MIN_PEPPER_BYTES = 32;
+
     private static final SecureRandom RANDOM = new SecureRandom();
-    private static final byte[] DEFAULT_SERVER_PEPPER = "exeris-identity-recovery-server-pepper-32b!".getBytes(StandardCharsets.UTF_8);
-    private static volatile byte[] serverPepper = DEFAULT_SERVER_PEPPER;
 
-    private TokenHasher() {
-    }
+    private final SecretKeySpec key;
 
     /**
-     * Configures the server pepper bytes injected from the host/kernel environment.
+     * Creates a hasher keyed by the pepper.
      *
-     * @param pepper non-null, non-empty server pepper
+     * @param pepper at least {@value #MIN_PEPPER_BYTES} bytes
+     * @throws IllegalArgumentException when the pepper is shorter
      */
-    public static void setServerPepper(byte[] pepper) {
-        if (pepper != null && pepper.length > 0) {
-            serverPepper = pepper.clone();
-        } else {
-            serverPepper = DEFAULT_SERVER_PEPPER;
+    public TokenHasher(byte[] pepper) {
+        Objects.requireNonNull(pepper, "pepper must not be null");
+        if (pepper.length < MIN_PEPPER_BYTES) {
+            throw new IllegalArgumentException("pepper must be at least "
+                    + MIN_PEPPER_BYTES + " bytes");
         }
+        this.key = new SecretKeySpec(pepper.clone(), "HmacSHA256");
     }
 
     /**
-     * Configures the server pepper string injected from the host/kernel environment.
-     *
-     * @param pepper non-null server pepper string
-     */
-    public static void setServerPepper(String pepper) {
-        setServerPepper(pepper != null ? pepper.getBytes(StandardCharsets.UTF_8) : null);
-    }
-
-    /**
-     * Hashes raw input string with HMAC-SHA256 using server pepper.
+     * Hashes the input under the pepper with no salt.
      *
      * @param raw input string; non-null
      * @return 64-character lowercase hex string
      */
-    public static String hash(String raw) {
+    public String hash(String raw) {
         return hashWithSalt(raw, null);
     }
 
     /**
-     * Hashes raw input string with user salt and server pepper using HMAC-SHA256.
+     * Hashes the input under the pepper, prefixed by an optional salt.
      *
      * @param raw  input string; non-null
-     * @param salt optional user salt (e.g. subjectId string)
+     * @param salt optional context prefix (e.g. the subject id)
      * @return 64-character lowercase hex string
      */
-    public static String hashWithSalt(String raw, String salt) {
+    public String hashWithSalt(String raw, String salt) {
         Objects.requireNonNull(raw, "raw must not be null");
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(serverPepper, "HmacSHA256"));
+            mac.init(key);
             if (salt != null && !salt.isEmpty()) {
                 mac.update(salt.getBytes(StandardCharsets.UTF_8));
                 mac.update((byte) ':');
             }
-            byte[] hashBytes = mac.doFinal(raw.getBytes(StandardCharsets.UTF_8));
-            return HexFormat.of().formatHex(hashBytes);
+            return HexFormat.of().formatHex(mac.doFinal(raw.getBytes(StandardCharsets.UTF_8)));
         } catch (Exception e) {
             throw new IllegalStateException("HmacSHA256 not available", e);
         }
     }
 
     /**
-     * Generates a cryptographically secure random token string of specified byte length, hex-encoded.
+     * Generates a cryptographically secure random token of {@code byteLength} bytes, hex-encoded.
      */
     public static String generateSecureHex(int byteLength) {
         byte[] bytes = new byte[byteLength];

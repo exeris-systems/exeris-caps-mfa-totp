@@ -1,7 +1,6 @@
 package eu.exeris.caps.mfatotp.internal;
 
 import eu.exeris.caps.mfatotp.api.TotpFactorRegistry;
-import eu.exeris.caps.mfatotp.api.TotpVerifier;
 import eu.exeris.caps.mfatotp.api.exception.FactorAlreadyEnrolledException;
 import eu.exeris.caps.mfatotp.api.exception.FactorNotFoundException;
 import eu.exeris.caps.mfatotp.api.exception.InvalidTotpCodeException;
@@ -17,18 +16,19 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.OptionalLong;
 import java.util.UUID;
 
 public final class DefaultTotpFactorRegistry implements TotpFactorRegistry {
 
     private final MfaRepository repository;
-    private final TotpVerifier verifier;
+    private final DefaultTotpVerifier verifier;
     private final MfaAuditBridge auditBridge;
     private final String issuer;
 
     public DefaultTotpFactorRegistry(
             MfaRepository repository,
-            TotpVerifier verifier,
+            DefaultTotpVerifier verifier,
             MfaAuditBridge auditBridge,
             String issuer
     ) {
@@ -52,11 +52,11 @@ public final class DefaultTotpFactorRegistry implements TotpFactorRegistry {
         Instant now = Instant.now();
 
         FactorRecord record = existing.map(rec -> new FactorRecord(
-                rec.id(), subjectId, rec.secret() != null ? rec.secret() : "", pendingSecret,
-                false, null, null, rec.createdAt(), now
+                rec.id(), subjectId, rec.secret(), pendingSecret,
+                false, null, null, rec.createdAt(), now, null
         )).orElseGet(() -> new FactorRecord(
-                UUID.randomUUID(), subjectId, "", pendingSecret,
-                false, null, null, now, now
+                UUID.randomUUID(), subjectId, null, pendingSecret,
+                false, null, null, now, now, null
         ));
 
         repository.saveFactor(record);
@@ -77,15 +77,15 @@ public final class DefaultTotpFactorRegistry implements TotpFactorRegistry {
             throw new InvalidTotpCodeException();
         }
 
-        boolean valid = verifier.verifyRaw(record.pendingSecret(), code);
-        if (!valid) {
+        OptionalLong step = verifier.matchStep(record.pendingSecret(), code);
+        if (step.isEmpty()) {
             throw new InvalidTotpCodeException();
         }
 
         Instant now = Instant.now();
         FactorRecord activated = new FactorRecord(
                 record.id(), subjectId, record.pendingSecret(), null,
-                true, now, now, record.createdAt(), now
+                true, now, now, record.createdAt(), now, step.getAsLong()
         );
 
         repository.saveFactor(activated);
@@ -123,9 +123,14 @@ public final class DefaultTotpFactorRegistry implements TotpFactorRegistry {
                 .orElseGet(() -> TotpFactorStatus.notEnrolled(subjectId));
     }
 
+    /** Percent-encoding for a URI label: a space is {@code %20}, because authenticators show {@code +} literally. */
+    private static String percentEncode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
+    }
+
     private String buildProvisioningUri(String base32Secret, String accountLabel) {
-        String encodedIssuer = URLEncoder.encode(issuer, StandardCharsets.UTF_8);
-        String encodedAccount = URLEncoder.encode(accountLabel, StandardCharsets.UTF_8);
+        String encodedIssuer = percentEncode(issuer);
+        String encodedAccount = percentEncode(accountLabel);
         return "otpauth://totp/"
                 + encodedIssuer + ":" + encodedAccount
                 + "?secret=" + base32Secret

@@ -1,6 +1,7 @@
 package eu.exeris.caps.mfatotp.internal.repository;
 
-import eu.exeris.caps.mfatotp.internal.crypto.TokenHasher;
+import eu.exeris.caps.mfatotp.api.exception.TotpSecretCustodyException;
+import eu.exeris.caps.mfatotp.internal.TestSecrets;
 import eu.exeris.kernel.spi.persistence.PersistenceConnection;
 import eu.exeris.kernel.spi.persistence.PersistenceStatement;
 import eu.exeris.kernel.spi.persistence.QueryResult;
@@ -21,6 +22,7 @@ import java.util.UUID;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("PostgresMfaRepository Unit Tests")
 class PostgresMfaRepositoryTest {
@@ -31,7 +33,7 @@ class PostgresMfaRepositoryTest {
     @BeforeEach
     void setUp() {
         tx = new CapturingTransactionalExecutor();
-        repository = new PostgresMfaRepository(tx);
+        repository = new PostgresMfaRepository(tx, TestSecrets.envelope());
     }
 
     @Test
@@ -42,7 +44,7 @@ class PostgresMfaRepositoryTest {
         Instant now = Instant.now();
         FactorRecord record = new FactorRecord(
                 factorId, subjectId, "BASE32SECRET", "PENDINGSECRET",
-                true, now, now, now, now
+                true, now, now, now, now, 57L
         );
 
         repository.saveFactor(record);
@@ -52,13 +54,17 @@ class PostgresMfaRepositoryTest {
         assertThat(stmt.sql).contains("INSERT INTO mfa_factors");
         assertThat(stmt.boundParameters.get(0)).isEqualTo(factorId);
         assertThat(stmt.boundParameters.get(1)).isEqualTo(subjectId);
-        assertThat(stmt.boundParameters.get(2)).isEqualTo("BASE32SECRET");
-        assertThat(stmt.boundParameters.get(3)).isEqualTo("PENDINGSECRET");
+        assertThat(stmt.boundParameters.get(2)).asString().doesNotContain("BASE32SECRET");
+        assertThat(TestSecrets.envelope().open(PostgresMfaRepository.context(factorId, subjectId, "secret"),
+                (String) stmt.boundParameters.get(2))).isEqualTo("BASE32SECRET");
+        assertThat(TestSecrets.envelope().open(PostgresMfaRepository.context(factorId, subjectId, "pending_secret"),
+                (String) stmt.boundParameters.get(3))).isEqualTo("PENDINGSECRET");
         assertThat(stmt.boundParameters.get(4)).isEqualTo(true);
         assertThat(stmt.boundParameters.get(5)).isEqualTo(now);
         assertThat(stmt.boundParameters.get(6)).isEqualTo(now);
         assertThat(stmt.boundParameters.get(7)).isEqualTo(now);
         assertThat(stmt.boundParameters.get(8)).isEqualTo(now);
+        assertThat(stmt.boundParameters.get(9)).isEqualTo(57L);
     }
 
     @Test
@@ -69,7 +75,10 @@ class PostgresMfaRepositoryTest {
         Instant now = Instant.now();
 
         Object[] rowData = new Object[]{
-                factorId, subjectId, "SECRET32", "PENDING", true, now, now, now, now
+                factorId, subjectId,
+                TestSecrets.envelope().seal(PostgresMfaRepository.context(factorId, subjectId, "secret"), "SECRET32"),
+                TestSecrets.envelope().seal(PostgresMfaRepository.context(factorId, subjectId, "pending_secret"), "PENDING"),
+                true, now, now, now, now, 41L
         };
         List<Object[]> rows = new ArrayList<>();
         rows.add(rowData);
@@ -86,6 +95,49 @@ class PostgresMfaRepositoryTest {
         assertThat(record.enabled()).isTrue();
         assertThat(record.enrolledAt()).isEqualTo(now);
         assertThat(record.lastVerifiedAt()).isEqualTo(now);
+        assertThat(record.lastAcceptedStep()).isEqualTo(41L);
+    }
+
+    @Test
+    @DisplayName("a plaintext secret in a stored row is refused, never returned")
+    void plaintextRowRefused() {
+        UUID subjectId = UUID.randomUUID();
+        Instant now = Instant.now();
+        List<Object[]> rows = new ArrayList<>();
+        rows.add(new Object[]{UUID.randomUUID(), subjectId, "JBSWY3DPEHPK3PXP", null, true, now, now, now, now, null});
+        tx.queryResultSupplier = () -> new StubQueryResult(rows);
+
+        assertThatThrownBy(() -> repository.findFactorBySubjectId(subjectId))
+                .isInstanceOf(TotpSecretCustodyException.class);
+    }
+
+    @Test
+    @DisplayName("a secret copied from another row fails authentication")
+    void copiedSecretRefused() {
+        UUID subjectId = UUID.randomUUID();
+        UUID otherFactor = UUID.randomUUID();
+        Instant now = Instant.now();
+        String foreign = TestSecrets.envelope().seal(
+                PostgresMfaRepository.context(otherFactor, subjectId, "secret"), "SECRET32");
+        List<Object[]> rows = new ArrayList<>();
+        rows.add(new Object[]{UUID.randomUUID(), subjectId, foreign, null, true, now, now, now, now, null});
+        tx.queryResultSupplier = () -> new StubQueryResult(rows);
+
+        assertThatThrownBy(() -> repository.findFactorBySubjectId(subjectId))
+                .isInstanceOf(TotpSecretCustodyException.class);
+    }
+
+    @Test
+    @DisplayName("an absent secret is stored as NULL, not as an empty string")
+    void absentSecretIsNull() {
+        UUID factorId = UUID.randomUUID();
+        Instant now = Instant.now();
+
+        repository.saveFactor(new FactorRecord(factorId, UUID.randomUUID(), null, "PENDING", false, null, null, now, now, null));
+
+        CapturingStatement stmt = tx.executedStatements.get(0);
+        assertThat(stmt.boundParameters).containsEntry(2, null);
+        assertThat(stmt.boundParameters.get(3)).isNotNull();
     }
 
     @Test
@@ -93,7 +145,7 @@ class PostgresMfaRepositoryTest {
     void saveAndCountRecoveryCodes() {
         UUID subjectId = UUID.randomUUID();
         UUID codeId = UUID.randomUUID();
-        String hash = TokenHasher.hash("code-1");
+        String hash = TestSecrets.hasher().hash("code-1");
         Instant now = Instant.now();
 
         RecoveryCodeRecord rec = new RecoveryCodeRecord(codeId, subjectId, hash, null, now);
@@ -127,6 +179,25 @@ class PostgresMfaRepositoryTest {
         tx.rowsAffectedResult = 0L;
         boolean consumedAgain = repository.consumeRecoveryCode(codeId, now);
         assertThat(consumedAgain).isFalse();
+
+        assertThat(tx.queryCalls).as("a write must not use the read-only query path").isZero();
+    }
+
+    @Test
+    @DisplayName("advanceAcceptedStep is one conditional UPDATE through the managed write path")
+    void advanceAcceptedStepIsOneConditionalUpdate() {
+        UUID factorId = UUID.randomUUID();
+        Instant now = Instant.now();
+
+        tx.rowsAffectedResult = 1L;
+        assertThat(repository.advanceAcceptedStep(factorId, 42L, now)).isTrue();
+        tx.rowsAffectedResult = 0L;
+        assertThat(repository.advanceAcceptedStep(factorId, 42L, now)).isFalse();
+
+        CapturingStatement stmt = tx.executedStatements.get(0);
+        assertThat(stmt.sql).startsWith("UPDATE mfa_factors").contains("last_accepted_step <");
+        assertThat(stmt.boundParameters).containsEntry(0, 42L).containsEntry(1, now).containsEntry(2, factorId);
+        assertThat(tx.queryCalls).isZero();
     }
 
     @Test
@@ -134,7 +205,7 @@ class PostgresMfaRepositoryTest {
     void challengeLifecycleInPostgres() {
         UUID challengeId = UUID.randomUUID();
         UUID subjectId = UUID.randomUUID();
-        String tokenHash = TokenHasher.hash("raw-token");
+        String tokenHash = TestSecrets.hasher().hash("raw-token");
         Instant now = Instant.now();
         Instant expiresAt = now.plusSeconds(300);
 
@@ -154,6 +225,7 @@ class PostgresMfaRepositoryTest {
         tx.rowsAffectedResult = 1L;
         boolean consumed = repository.consumeChallenge(challengeId, now);
         assertThat(consumed).isTrue();
+        assertThat(tx.queryCalls).as("a write must not use the read-only query path").isZero();
     }
 
     // --- Stubs for TransactionalExecutor testing ---
@@ -162,6 +234,7 @@ class PostgresMfaRepositoryTest {
         final List<CapturingStatement> executedStatements = new ArrayList<>();
         java.util.function.Supplier<QueryResult> queryResultSupplier;
         long rowsAffectedResult = 1L;
+        int queryCalls;
 
         @Override
         public void execute(TransactionalWork work) {
@@ -180,6 +253,7 @@ class PostgresMfaRepositoryTest {
 
         @Override
         public <T> T query(Function<PersistenceConnection, T> query) {
+            queryCalls++;
             return query.apply(new CapturingConnection(this));
         }
     }

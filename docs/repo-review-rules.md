@@ -4,7 +4,7 @@ type: reference
 visibility: public
 owning-repo: exeris-caps-mfa-totp
 status: active
-last-verified: 2026-10-13
+last-verified: 2026-10-14
 ---
 
 # Review rules for `exeris-caps-mfa-totp`
@@ -34,15 +34,17 @@ S1. **The cap-tier Wall holds** (ADR-055, ADR-006; `AGENTS.md` §2). Only what t
     `exeris:verify-capabilities` at `process-classes` over the compiled main classes, and it rejects
     a reference to `org.springframework.*`, `io.netty.*`, `reactor.*` or `jakarta.servlet.*`, to
     kernel internals (`eu.exeris.kernel.**.internal.**`), and to a sibling capability's `internal`
-    package; only `eu.exeris.kernel.spi.*` is the kernel this capability may name. In a diff: such
+    package; the public (non-`internal`) packages of `exeris-kernel-spi`
+    and `exeris-kernel-core` are the kernel this capability may name. In a diff: such
     an import in `src/main`; a dependency in `pom.xml` that brings one in; a rename of the package
     root `eu.exeris.caps.mfatotp` or an extra segment in it, because the guard derives the
     capability's name from the segment after `eu.exeris.caps.`; `eu.exeris.caps.mfatotp.internal` is
     private to this capability and `eu.exeris.caps.mfatotp.api` is the cross-cap surface, and an
     `internal` type in a public signature → `[HARD BLOCK]`. A Spring, servlet, Netty or reactor
     import in `src/test` is outside what the guard scans and is still forbidden by `AGENTS.md` →
-    `[CONTRACT]`. A `kernel-core` or `kernel-community` dependency outside `test` scope →
-    `[HARD BLOCK]`.
+    `[CONTRACT]`. A kernel
+    driver dependency (`exeris-kernel-community` or an enterprise driver) outside `test` scope →
+    `[HARD BLOCK]`: the driver is chosen by the SKU, never by a capability.
 
 S2. **The committed manifest is regenerated, never edited.**
     `src/main/generated/java/cap-manifest.json` is written by `exeris:generate`, and a clean
@@ -110,9 +112,11 @@ S11. **A challenge is short-lived and sits between the password check and the se
     (`MfaChallenge`, `IssuedChallenge`). A challenge with no expiry, or a challenge that can be
     issued for a subject whose password check has not succeeded → `[HARD BLOCK]`.
 
-S12. **Storage honours the README.** In-memory unless a `TransactionalExecutor` is supplied, then
-    PostgreSQL, with the DDL in `src/main/resources/schema/mfa-totp-schema.sql` applied by the SKU.
-    A change to a stored column that leaves that file unchanged → `[CONTRACT]`.
+S12. **Storage honours the README.** The wired module requires a `TransactionalExecutor` and stores in
+    PostgreSQL; there is no in-memory store in `src/main`. The DDL is
+    `src/main/resources/db/migration/exeris-caps-mfa-totp/V1__create_mfa_totp.sql`, listed in
+    `MfaTotpModule.MIGRATIONS` and applied by the SKU. A change to a stored column that leaves that file
+    unchanged → `[CONTRACT]`.
 
 ## Where this does not apply, and what it costs
 

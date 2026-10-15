@@ -10,6 +10,12 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public final class InMemoryMfaRepository implements MfaRepository {
 
+    /** Holds secrets in the clear, so there is nothing to re-seal. */
+    @Override
+    public int resealWithActiveKey() {
+        return 0;
+    }
+
     private final Map<UUID, FactorRecord> factorsBySubject = new ConcurrentHashMap<>();
     private final Map<String, RecoveryCodeRecord> recoveryCodesByHash = new ConcurrentHashMap<>();
     private final Map<String, ChallengeRecord> challengesByHash = new ConcurrentHashMap<>();
@@ -22,6 +28,22 @@ public final class InMemoryMfaRepository implements MfaRepository {
     @Override
     public void saveFactor(FactorRecord record) {
         factorsBySubject.put(record.subjectId(), record);
+    }
+
+    @Override
+    public synchronized boolean advanceAcceptedStep(UUID factorId, long step, Instant now) {
+        for (FactorRecord rec : factorsBySubject.values()) {
+            if (rec.id().equals(factorId)) {
+                if (!rec.enabled() || (rec.lastAcceptedStep() != null && rec.lastAcceptedStep() >= step)) {
+                    return false;
+                }
+                factorsBySubject.put(rec.subjectId(), new FactorRecord(
+                        rec.id(), rec.subjectId(), rec.secret(), rec.pendingSecret(), rec.enabled(),
+                        rec.enrolledAt(), now, rec.createdAt(), now, step));
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override

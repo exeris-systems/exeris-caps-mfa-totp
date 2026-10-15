@@ -23,7 +23,7 @@ class DefaultRecoveryCodesTest {
     @BeforeEach
     void setUp() {
         repository = new InMemoryMfaRepository();
-        recoveryCodes = new DefaultRecoveryCodes(repository, null);
+        recoveryCodes = new DefaultRecoveryCodes(repository, TestSecrets.hasher(), null);
         subjectId = UUID.randomUUID();
     }
 

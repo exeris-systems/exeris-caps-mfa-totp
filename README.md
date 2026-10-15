@@ -14,7 +14,30 @@ Status: proof of concept, built against `exeris-kernel` 0.13.0-SNAPSHOT. The API
 
 Behaviour worth knowing before composing it:
 
-- Storage is in memory unless a kernel `TransactionalExecutor` is supplied, in which case a PostgreSQL repository is used. The DDL is `src/main/resources/schema/mfa-totp-schema.sql`; nothing applies it automatically.
+- Storage is PostgreSQL through a kernel `TransactionalExecutor`; there is no in-memory store. The composition conductor's no-arg instance only runs the lifecycle hooks and its service accessors throw. The composing SKU builds the wired instance with `new MfaTotpModule(tx, auditLogSink, issuer)` and applies `MfaTotpModule.MIGRATIONS` (`src/main/resources/db/migration/exeris-caps-mfa-totp/V1__create_mfa_totp.sql`) first; the capability applies nothing itself.
+- A TOTP time step is accepted once per factor: `TotpVerifier.verify` refuses a code whose step is not greater than the last one accepted, with a single conditional `UPDATE`, so concurrent presentations of one code admit one.
+- Attempt limiting is the caller's duty. `TotpVerifier` and `RecoveryCodes` keep no failure counter; the caller validates an `MfaChallenge` first, calls `recordFailure` on every failure and `consume` on success. `MfaChallenge.issue` must only follow a successful password check, which this capability cannot establish.
+
+## Configuration
+
+The wired constructors read their configuration from the environment (or a `Map` passed to the constructor) when they are called. A missing or malformed required value throws `MfaTotpConfigurationException`, which names the key and never carries a value, so the deployment fails to boot.
+
+| Key | Required | Default | Meaning |
+|---|---|---|---|
+| `EXERIS_MFA_TOTP_PEPPER` | yes (or `_FILE`) | – | Base64 of at least 32 random bytes; keys the HMAC-SHA256 of recovery codes and challenge tokens |
+| `EXERIS_MFA_TOTP_PEPPER_FILE` | yes (or inline) | – | path to a file holding the same value, such as a mounted secret |
+| `EXERIS_MFA_TOTP_KEKS` | yes (or `_FILE`) | – | key-encryption keyring, `<id>:<base64>[,<id>:<base64>…]` |
+| `EXERIS_MFA_TOTP_KEKS_FILE` | yes (or inline) | – | path to a file holding the same keyring |
+| `EXERIS_MFA_TOTP_CHALLENGE_TTL` | no | `PT5M` | lifetime of a challenge issued without one |
+| `EXERIS_MFA_TOTP_CHALLENGE_MAX_TTL` | no | `PT10M` | upper bound on any challenge lifetime; a longer request is clamped |
+
+Set exactly one of each inline/file pair. The pepper and each key must come from a CSPRNG, for example `openssl rand -base64 32`; a passphrase is refused, not stretched into a key, and there is no built-in value. Durations are ISO-8601.
+
+## Security notes
+
+- **Hashed:** recovery codes and challenge tokens are stored as HMAC-SHA256 under the pepper. A database read yields no usable code or token. Rotating the pepper invalidates every stored recovery code and open challenge.
+- **Sealed:** a TOTP seed cannot be hashed, so `mfa_factors.secret` and `pending_secret` hold AES-256-GCM envelopes. An envelope names the key that sealed it and is bound to its row id, subject and column, so a value copied to another row or column fails authentication. The first keyring entry seals; the others only open. To rotate a key, prepend the new entry, call `MfaTotpModule.resealWithActiveKey()` (it returns the number of factors re-sealed), then remove the old entry. A stored value that is not an envelope, names an unknown key or fails authentication throws `TotpSecretCustodyException`; nothing falls back to plaintext.
+- **Not covered:** the seed is plaintext in the process while a code is checked, and in the enrolment response that shows it to the user once.
 
 ## Build & test
 
@@ -27,7 +50,7 @@ mvn verify                               # pass 2 — generate cap-manifest.json
 
 Both passes are needed after a `clean`: `exeris:generate` runs before `compile`, and `compile` is when the processor writes the metadata it reads. `src/main/generated/java/cap-manifest.json` is committed, so a clean `git status` after `mvn verify` shows the manifest matches the declaration.
 
-The upstreams are not on Maven Central. `exeris-sdk` v0.12.0 and `exeris-tooling` v0.9.0 are built from source at those tags, and `exeris-kernel` 0.13.0-SNAPSHOT is resolved from GitHub Packages, which needs a token with `read:packages`; the sibling `exeris-caps-service-boundary-core` and `exeris-caps-audit-trail` are built from source first. [`.github/workflows/build.yml`](.github/workflows/build.yml) is the exact sequence, and [`.github/maven-settings.xml`](.github/maven-settings.xml) the repository configuration it uses.
+`exeris-tooling` 0.10.0 resolves from Maven Central. `exeris-sdk` v0.12.0 and `exeris-tooling` v0.9.0 (the version the sibling caps declare) are built from source at those tags, and `exeris-kernel` 0.13.0-SNAPSHOT is resolved from GitHub Packages, which needs a token with `read:packages`; the sibling `exeris-caps-service-boundary-core` and `exeris-caps-audit-trail` are built from source first. [`.github/workflows/build.yml`](.github/workflows/build.yml) is the exact sequence, and [`.github/maven-settings.xml`](.github/maven-settings.xml) the repository configuration it uses.
 
 ## Documentation
 
