@@ -1,5 +1,6 @@
 package eu.exeris.caps.mfatotp;
 
+import eu.exeris.kernel.spi.contract.EntitlementClass;
 import eu.exeris.kernel.spi.contract.EntitlementRequirement;
 import eu.exeris.kernel.tck.contract.AbstractEntitlementRequirementTck;
 import org.junit.jupiter.api.DisplayName;
@@ -34,5 +35,13 @@ class MfaTotpEntitlementTest extends AbstractEntitlementRequirementTck {
     void requiresOnlyItsOwnCapability() {
         assertThat(new MfaTotpEntitlement().requiredCapabilities()).containsExactly("exeris-caps-mfa-totp");
         assertThat(MfaTotpEntitlement.CAPABILITY_ID).isEqualTo("exeris-caps-mfa-totp");
+    }
+
+    @Test
+    @DisplayName("entitlementClass() is COMMERCIAL and stable across calls")
+    void entitlementClassIsCommercialAndStable() {
+        MfaTotpEntitlement entitlement = new MfaTotpEntitlement();
+        assertThat(entitlement.entitlementClass()).isEqualTo(EntitlementClass.COMMERCIAL);
+        assertThat(entitlement.entitlementClass()).isSameAs(entitlement.entitlementClass());
     }
 }
